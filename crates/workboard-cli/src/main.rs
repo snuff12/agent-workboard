@@ -1,3 +1,4 @@
+mod agent;
 mod cancellation;
 mod journal;
 mod plugins;
@@ -101,6 +102,11 @@ enum Commands {
         #[command(subcommand)]
         command: workflow::ViewCommand,
     },
+    #[command(about = "Agent session context, protocol, and session-start hooks")]
+    Agent {
+        #[command(subcommand)]
+        command: agent::AgentCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -202,8 +208,32 @@ enum TaskCommand {
     },
     Claim {
         task_id: String,
+        #[arg(long, help = "Defaults to WORKBOARD_AGENT or the Codex thread")]
+        agent: Option<String>,
+    },
+    #[command(about = "Refresh the claim of a task you hold")]
+    Heartbeat {
+        task_id: String,
         #[arg(long)]
-        agent: String,
+        agent: Option<String>,
+    },
+    #[command(about = "Release a task you hold and interrupt its running run")]
+    Release {
+        task_id: String,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    #[command(about = "Pause unfinished work with its state and next action")]
+    Pause {
+        task_id: String,
+        #[arg(long)]
+        summary: String,
+        #[arg(long)]
+        next_action: Option<String>,
+        #[arg(long)]
+        run: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
     },
     Start {
         task_id: String,
@@ -447,6 +477,17 @@ impl Client {
         }
     }
     pub fn call(&self, method: &str, params: Value, request_id: &str) -> Value {
+        self.request(method, params, request_id, true, Duration::from_secs(35))
+    }
+    /// `start_service: false` only uses a running service, as session hooks must stay fast.
+    pub fn request(
+        &self,
+        method: &str,
+        params: Value,
+        request_id: &str,
+        start_service: bool,
+        read_timeout: Duration,
+    ) -> Value {
         let params = match resolve_file_request_path(method, params) {
             Ok(params) => params,
             Err(message) => return failure(request_id, "INVALID_PARAMS", message),
@@ -456,9 +497,14 @@ impl Client {
             Err(response) => return response,
         };
         let result = (|| -> Result<Value, String> {
-            let mut stream = self.connect()?;
+            let mut stream = if start_service {
+                self.connect()?
+            } else {
+                self.existing_connection()?
+                    .ok_or("The board service is not running.")?
+            };
             stream
-                .set_read_timeout(Some(Duration::from_secs(35)))
+                .set_read_timeout(Some(read_timeout))
                 .map_err(|e| e.to_string())?;
             stream
                 .set_write_timeout(Some(Duration::from_secs(10)))
@@ -611,11 +657,40 @@ fn main() {
             }
         }
     }
+    if let Commands::Agent { ref command } = cli.command {
+        match command {
+            agent::AgentCommand::Brief => print!("{}", agent::PROTOCOL),
+            agent::AgentCommand::Hook { client: tool } => agent::hook(&client, *tool),
+            agent::AgentCommand::Context { cwd } => {
+                let cwd = cwd
+                    .clone()
+                    .or_else(|| std::env::current_dir().ok())
+                    .unwrap_or_default();
+                let me = agent::identity();
+                match agent::context(&client, &cwd, me.as_deref(), true, Duration::from_secs(35)) {
+                    Ok(text) if cli.json => output(
+                        &success(&request_id, json!({"agent":me,"context":text})),
+                        true,
+                    ),
+                    Ok(text) => println!("{text}"),
+                    Err(message) => {
+                        output(
+                            &failure(&request_id, "SERVICE_UNAVAILABLE", message),
+                            cli.json,
+                        );
+                        std::process::exit(1)
+                    }
+                }
+            }
+        }
+        std::process::exit(0);
+    }
     if let Commands::Plugin { ref command } = cli.command {
         let response = plugins::execute(&client, command, &request_id);
         output(&response, cli.json);
         std::process::exit(if response["ok"] == true { 0 } else { 1 });
     }
+    let is_rpc = matches!(cli.command, Commands::Rpc { .. });
     let (method, mut params) = match cli.command {
         Commands::Project { command } => match command {
             ProjectCommand::List => ("project.list".into(), json!({})),
@@ -709,7 +784,40 @@ fn main() {
             ),
             TaskCommand::Claim { task_id, agent } => (
                 "task.claim".into(),
-                json!({"task_id":task_id,"agent_id":agent}),
+                params_object(vec![
+                    ("task_id", Some(json!(task_id))),
+                    ("agent_id", string(agent)),
+                ]),
+            ),
+            TaskCommand::Heartbeat { task_id, agent } => (
+                "task.heartbeat".into(),
+                params_object(vec![
+                    ("task_id", Some(json!(task_id))),
+                    ("agent_id", string(agent)),
+                ]),
+            ),
+            TaskCommand::Release { task_id, agent } => (
+                "task.release".into(),
+                params_object(vec![
+                    ("task_id", Some(json!(task_id))),
+                    ("agent_id", string(agent)),
+                ]),
+            ),
+            TaskCommand::Pause {
+                task_id,
+                summary,
+                next_action,
+                run,
+                agent,
+            } => (
+                "task.pause".into(),
+                params_object(vec![
+                    ("task_id", Some(json!(task_id))),
+                    ("summary", Some(json!(summary))),
+                    ("next_action", string(next_action)),
+                    ("run_id", string(run)),
+                    ("agent_id", string(agent)),
+                ]),
             ),
             TaskCommand::Start {
                 task_id,
@@ -829,8 +937,19 @@ fn main() {
         }
         Commands::Inbox { command } => workflow_request(command.request(), &request_id, cli.json),
         Commands::View { command } => workflow_request(command.request(), &request_id, cli.json),
-        Commands::Plugin { .. } | Commands::Serve => unreachable!(),
+        Commands::Plugin { .. } | Commands::Serve | Commands::Agent { .. } => unreachable!(),
     };
+    // Agent sessions identify themselves without repeating --agent. Raw `rpc` stays explicit.
+    if !is_rpc {
+        if let Some(me) = agent::identity() {
+            let fields = params.as_object_mut().unwrap();
+            if agent::IDENTIFIED_METHODS.contains(&method.as_str()) {
+                fields.entry("agent_id").or_insert(json!(me));
+            } else if method == "inbox.capture" {
+                fields.entry("source").or_insert(json!(me));
+            }
+        }
+    }
     if let Some(revision) = cli.expected_revision {
         params
             .as_object_mut()

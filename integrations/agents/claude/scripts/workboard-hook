@@ -1,0 +1,10 @@
+#!/bin/sh
+# Agent Workboard session-start hook. Prints board context for the agent and never blocks the session.
+tool="$1"
+for candidate in "${WORKBOARD_BIN:-}" "$(command -v workboard 2>/dev/null)" "$HOME/.local/bin/workboard"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        exec "$candidate" agent hook --client "$tool"
+    fi
+done
+cat >/dev/null 2>&1
+exit 0
