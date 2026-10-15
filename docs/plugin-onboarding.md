@@ -9,6 +9,19 @@ Users should select a service and connect it. Local executable paths, account la
 | Google Workspace | Select Calendar and optional Gmail, then Sign in with Google. The separate release package contains the publisher's registered Desktop OAuth client. Tokens remain in Keychain; only successful authentication enables the plugin. |
 | Slack | Paste a User OAuth token into a secure field. The workspace is detected automatically. No token file or workspace ID input; status sending stays separate. Browser OAuth is not implemented for Slack. |
 
+## Google setup responsibilities
+
+Google Cloud setup is done once by the publisher for this product. People downloading a publisher-configured plugin use the same registered Desktop client and authorize their own accounts. They do not create Cloud projects, enable APIs, download client JSON, or become developers.
+
+| Who | Required steps |
+| --- | --- |
+| Publisher | Register the OAuth app/client, configure APIs and requested scopes, complete applicable production verification, and include Desktop client metadata in the separate plugin package. |
+| Each user | Install the plugin, choose Calendar and optional Gmail, then select Sign in with Google and approve the selected access. |
+| Publisher during testing | Add the intended accounts to the test-user list. This is a temporary development restriction, not the public onboarding flow. |
+| Advanced/self-built users | Supply their own client only when choosing to build or operate a separate OAuth app. This is optional for normal downloads. |
+
+Testing mode permits only registered test users and has token-lifetime restrictions. General distribution requires production configuration and applicable brand and scope verification, including the required public app information and privacy policy. Completing a test login does not establish public-release readiness. See [Google's verification and testing requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification).
+
 ## Design references
 
 - [Raycast OAuthService](https://developers.raycast.com/utilities/oauth/oauthservice) separates provider setup from command use. Google requires a product-owned client rather than borrowing another extension's identity.
@@ -40,4 +53,4 @@ The build copies only `client_id` and optional Desktop `client_secret` into `oau
 
 Automated checks cover explicit-only setup, no implicit enablement/service startup, forbidden board mutations, generation conflicts, cancellation, local detection/selection, OAuth package sanitization, selected scopes, and Slack workspace detection. Real Google consent and account operations require their own execution evidence.
 
-The October 16 verification passed Rust 71/Python 157 and the actual-source Swift runner, including cancellation and connection-discovery models. A release installation retained nine existing tasks and all saved plugin settings. Native Connect screens detected and connected amem and the matching Orca repository. Google client registration remains at the owner's policy-consent step; its real account login is not yet verified. No test client ID is installed as a working Google connection.
+The October 16 verification passed Rust 71/Python 157 and the actual-source Swift runner, including cancellation and connection-discovery models. A release installation retained nine existing tasks and all saved plugin settings. Native Connect screens detected and connected amem and the matching Orca repository. The owner authorized Google's policy consent and Desktop client setup, but browser window control became unavailable before submission. Registration and real account login are not yet complete. No test client ID is installed as a working Google connection.

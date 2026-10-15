@@ -16,6 +16,8 @@ agent-memory, Google Workspace, Slack, and Orca integrations are separate plugin
 
 In plugin settings, choose **Connect**. Orca detects its CLI and registered repositories; agent-memory detects amem. Google uses **Sign in with Google** with Calendar selected by default and Gmail optional. The Workspace release package supplies the publisher's Desktop OAuth client; users do not prepare client JSON. Slack accepts a User OAuth token in a secure field and detects its workspace. Custom paths and developer credentials remain in Advanced settings. See [connection setup](docs/plugin-onboarding.md).
 
+Google Cloud setup is performed once by the publisher, not by each user. Publisher registration and real-account login are still pending, so the current local Google package cannot sign in yet. General distribution also requires production configuration and applicable Google verification.
+
 The agent-memory plugin searches existing documents and memories and submits explicitly selected decisions as memory candidates. Google Workspace centers on Calendar deadlines and meetings, with optional Gmail search and attachments. Orca browses local worktrees and run terminals, imports work as tasks, and launches board tasks through Codex or Claude.
 
 Slack provides message search, source reading, attachments, and task imports. Separately enable sending to post a selected task's status to a specified channel. See [Slack setup](docs/slack.md). Real-account search and sending have not yet been verified.
