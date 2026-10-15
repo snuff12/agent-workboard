@@ -168,10 +168,37 @@ class WorkspacePlugin(unittest.TestCase):
         self.assertEqual(self.request().method, "GET")
 
     def test_import_all_day_preserves_exclusive_end_and_inclusive_due_date(self):
-        self.responses(event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"}))
+        self.responses(event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"}),
+                       {"timeZone": "America/Los_Angeles"})
         creation = self.run_method("events.import", {"event_id": "e", "project_id": "p"})["requests"][0]["params"]
         self.assertEqual(creation["scheduled_end"], "2026-10-18")
         self.assertEqual(creation["due_at"], "2026-10-17")
+        self.assertEqual(creation["time_zone"], "America/Los_Angeles")
+        self.assertTrue(self.request().full_url.endswith("users/me/calendarList/primary"))
+
+    def test_all_day_list_and_detail_use_authoritative_calendar_zone(self):
+        item = event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"})
+        self.responses({"items": [item], "timeZone": "America/Los_Angeles"})
+        result = self.run_method("events.list")["result"]
+        self.assertEqual(result["events"][0]["time_zone"], "America/Los_Angeles")
+        self.responses(item, {"timeZone": "America/Los_Angeles"})
+        result = self.run_method("events.get", {"event_id": "event1", "calendar_id": "a+b@example.com"})["result"]
+        self.assertEqual(result["time_zone"], "America/Los_Angeles")
+        self.assertTrue(self.request().full_url.endswith("calendarList/a%2Bb%40example.com"))
+
+    def test_missing_calendar_zone_does_not_guess_utc_or_prepare_board_writes(self):
+        for calendar in ({}, {"timeZone": "Invalid/Zone"}):
+            self.responses(event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"}), calendar)
+            with self.subTest(calendar=calendar), self.assertRaises(workspace.IntegrationError):
+                self.run_method("events.import", {"event_id": "e", "project_id": "p"})
+
+    def test_timed_event_without_explicit_zone_uses_calendar_zone(self):
+        self.responses(event(start={"dateTime": "2026-10-16T10:00:00-07:00"},
+                             end={"dateTime": "2026-10-16T11:00:00-07:00"}),
+                       {"timeZone": "America/Los_Angeles"})
+        creation = self.run_method("events.import", {"event_id": "e", "project_id": "p"})["requests"][0]["params"]
+        self.assertEqual(creation["scheduled_start"], "2026-10-16T10:00:00-07:00")
+        self.assertEqual(creation["time_zone"], "America/Los_Angeles")
 
     def test_pull_updates_only_schedule_with_revision_and_source_link(self):
         self.responses(event())
@@ -191,12 +218,13 @@ class WorkspacePlugin(unittest.TestCase):
         self.assertEqual(error.exception.code, "CONFLICT")
         self.assertEqual(self.urlopen.call_count, 1)
 
-    def test_pull_all_day_uses_last_inclusive_day_and_preserves_fallback_zone(self):
-        self.responses(event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"}))
+    def test_pull_all_day_uses_last_inclusive_day_and_calendar_zone(self):
+        self.responses(event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"}),
+                       {"timeZone": "America/Los_Angeles"})
         update = self.run_method("events.pull", {"event_id": "event1", "etag": '"v1"', "task": self.task()})["requests"][0]["params"]
         self.assertEqual(update["due_at"], "2026-10-17")
         self.assertEqual(update["scheduled_end"], "2026-10-18")
-        self.assertEqual(update["time_zone"], "Asia/Seoul")
+        self.assertEqual(update["time_zone"], "America/Los_Angeles")
 
     def test_pull_rejects_cancelled_or_invalid_event_without_board_requests(self):
         for changes in [{"status": "cancelled"}, {"start": {}, "end": {}}]:

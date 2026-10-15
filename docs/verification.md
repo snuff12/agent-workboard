@@ -2,6 +2,10 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## Plugin readiness audit
+
+The October 15, 2026 follow-up checked all four current plugin packages with an isolated board. Actual amem search/read/evidence attachment and Orca worktree browsing/import/attachment passed. Google Workspace and Slack passed mocked provider/host checks and real missing-credential isolation checks; authenticated account operations remain unverified. The audit also reproduced and fixed loss of the calendar time zone when importing date-only events. See the [plugin readiness report](plugin-readiness.md) for exact coverage and remaining checks.
+
 ## English-only migration
 
 Project documentation, UI, CLI help/errors, service diagnostics, plugin descriptions/messages, comments, examples, and fixtures were converted to English. App/widget development regions and owned date/weekday display use English while retaining actual time zones. User task data remains unrestricted; Unicode search and byte-boundary coverage are preserved with English/Latin-text and currency fixtures.

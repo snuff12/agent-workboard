@@ -64,7 +64,7 @@ Apply a previously read event to an existing task with its ETag:
 workboard plugin run google-workspace events.pull --task TASK_ID --params '{"calendar_id":"primary","event_id":"EVENT_ID","etag":"\"GOOGLE_ETAG\""}'
 ```
 
-Read the latest event and reject changed ETags with `CONFLICT`. Otherwise update only deadline, schedule, and zone and attach the source. The service also checks local revisions, preventing concurrent overwrite. Preserve title/goal/assignee/status and do not write Google. Prefer event or calendar-level time zone metadata when available; if neither supplies a name, retain the task's zone and preserve timestamp offsets.
+Read the latest event and reject changed ETags with `CONFLICT`. Otherwise update only deadline, schedule, and zone and attach the source. The service also checks local revisions, preventing concurrent overwrite. Preserve title/goal/assignee/status and do not write Google. Use the event's named time zone when present. Otherwise read its calendar's zone with [CalendarList.get](https://developers.google.com/workspace/calendar/api/v3/reference/calendarList/get), using the existing `calendar.calendarlist.readonly` scope. This also applies to date-only events, whose start/end normally omit a named zone. Listing uses the response's calendar zone. Preserve timestamp offsets; if calendar metadata cannot provide a valid zone, fail before changing the board rather than assigning UTC or the old task's zone.
 
 The following command actually creates an external event; select the intended task/calendar before running it:
 
