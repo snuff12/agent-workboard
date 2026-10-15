@@ -12,7 +12,8 @@ for plugin in agent-memory google-workspace slack orca; do
     ARCHIVE="${ARCHIVE_DIR}/AgentWorkboard-plugin-${PACKAGE}.zip"
     MEMBERS="$(/usr/bin/unzip -Z -1 "$ARCHIVE")"
     EXPECTED="$(printf '%s\n%s' "${PACKAGE}/plugin.json" "${PACKAGE}/plugin.py")"
-    [[ "$MEMBERS" == "$EXPECTED" ]] || { echo 'The ZIP contains items other than the manifest and executable.' >&2; exit 1; }
+    WITH_CLIENT="${EXPECTED}"$'\n'"${PACKAGE}/oauth-client.json"
+    [[ "$MEMBERS" == "$EXPECTED" || ( "$plugin" == google-workspace && "$MEMBERS" == "$WITH_CLIENT" ) ]] || { echo 'The ZIP contains unexpected files.' >&2; exit 1; }
     /usr/bin/unzip -q "$ARCHIVE" -d "${VERIFY_DIR}/extracted"
     [[ -x "${VERIFY_DIR}/extracted/${PACKAGE}/plugin.py" ]] || { echo 'The extracted executable lacks execute permission.' >&2; exit 1; }
     "$CLI" --json --data-dir "${VERIFY_DIR}/data" --socket "${VERIFY_DIR}/s.sock" \

@@ -212,11 +212,37 @@ def run(request):
     if not isinstance(request, dict) or request.get("protocol_version", 1) != 1:
         raise IntegrationError("Unsupported plugin request protocol.", "INVALID_REQUEST")
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
-    if not isinstance(config, dict) or not isinstance(params, dict) or method not in METHODS:
+    if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("Check plugin configuration and the request.", "INVALID_REQUEST")
-    account = required(config, "account")
     if any(key in config for key in ("token", "access_token", "bot_token", "user_token")):
         raise IntegrationError("Do not put tokens in configuration JSON. Connect them through credentials_file.", "INVALID_REQUEST")
+    if method == "discover":
+        return {"ok": True, "result": {"available": True,
+            "message": "Connect a Slack User OAuth token. Your workspace is detected automatically.",
+            "config": {"account": str(config.get("account") or "default"),
+                       "messages_enabled": True, "send_enabled": config.get("send_enabled") is True}}}
+    if method == "connect":
+        filename = Path(required(params, "credentials_file")).expanduser()
+        try:
+            if filename.stat().st_size > 16384:
+                raise ValueError()
+            data = json.loads(filename.read_text())
+            token = valid_token(data.get("access_token") if isinstance(data, dict) else None)
+        except (OSError, ValueError):
+            raise IntegrationError("Check the Slack User OAuth token.", "AUTHORIZATION_REQUIRED") from None
+        response = api("auth.test", token)
+        team_id = required(response, "team_id")
+        if config.get("team_id") and config["team_id"] != team_id:
+            raise IntegrationError("This token belongs to a different workspace. Use Advanced settings to change workspaces.", "AUTHORIZATION_REQUIRED")
+        result = identity(response, team_id)
+        account = str(config.get("account") or "default")
+        keychain(account, {"access_token": token, **result})
+        return {"ok": True, "result": {"connected": True, **result, "config": {
+            "account": account, "team_id": team_id, "messages_enabled": True,
+            "send_enabled": config.get("send_enabled") is True}}}
+    if method not in METHODS:
+        raise IntegrationError("Check plugin configuration and the request.", "INVALID_REQUEST")
+    account = required(config, "account")
     if method == "disconnect":
         keychain(account, remove=True)
         return {"ok": True, "result": {"connected": False, "token_revoked": False}}

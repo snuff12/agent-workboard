@@ -267,8 +267,22 @@ pub enum PluginCommand {
     Config {
         id: String,
     },
+    /// Discover connection settings through an installed plugin without enabling it.
+    Setup {
+        id: String,
+        #[arg(default_value = "discover")]
+        method: String,
+        #[arg(long, default_value = "{}")]
+        params: String,
+        #[arg(long)]
+        expected_generation: Option<String>,
+    },
     Install {
         package: PathBuf,
+        /// Update an installed package while preserving its settings and enabled state.
+        #[arg(long)]
+        #[serde(skip_serializing_if = "is_false")]
+        replace: bool,
     },
     Enable {
         id: String,
@@ -276,6 +290,9 @@ pub enum PluginCommand {
         executable: Option<String>,
         #[arg(long)]
         config: Option<String>,
+        #[arg(long)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        expected_generation: Option<String>,
     },
     Disable {
         id: String,
@@ -302,6 +319,10 @@ pub enum PluginCommand {
         #[arg(long)]
         locator: Option<String>,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone)]

@@ -27,6 +27,8 @@ struct Manifest {
     #[serde(default)]
     task_context_methods: Vec<String>,
     #[serde(default)]
+    setup_methods: Vec<String>,
+    #[serde(default)]
     description: String,
     #[serde(default = "default_timeout")]
     timeout_seconds: u64,
@@ -203,7 +205,7 @@ fn copy_package(
     Ok(())
 }
 fn entry_info(entry: &Installed) -> Value {
-    json!({"id":entry.manifest.id,"name":entry.manifest.name,"version":entry.manifest.version,"description":entry.manifest.description,"enabled":entry.enabled,"compatible":entry.manifest.protocol_version==1,"methods":entry.manifest.methods,"allowed_requests":entry.manifest.allowed_requests})
+    json!({"id":entry.manifest.id,"name":entry.manifest.name,"version":entry.manifest.version,"description":entry.manifest.description,"enabled":entry.enabled,"compatible":entry.manifest.protocol_version==1,"methods":entry.manifest.methods,"allowed_requests":entry.manifest.allowed_requests,"setup_methods":entry.manifest.setup_methods})
 }
 
 pub fn execute(client: &Client, command: &PluginCommand, request_id: &str) -> Value {
@@ -277,7 +279,26 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
                 .ok_or("PLUGIN_NOT_INSTALLED: The plugin is not installed.")?;
             Ok(json!({"id":id,"config":entry.config}))
         }),
-        PluginCommand::Install { package } => (|| {
+        PluginCommand::Setup {
+            id,
+            method,
+            params,
+            expected_generation,
+        } => {
+            let params = match serde_json::from_str(params) {
+                Ok(params) => params,
+                Err(error) => return failure(request_id, "INVALID_PARAMS", error.to_string()),
+            };
+            return setup(
+                client,
+                id,
+                method,
+                params,
+                request_id,
+                expected_generation.as_deref(),
+            );
+        }
+        PluginCommand::Install { package, replace } => (|| {
             let manifest: Manifest = serde_json::from_slice(
                 &fs::read(package.join("plugin.json")).map_err(|e| e.to_string())?,
             )
@@ -295,9 +316,9 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
                 return Err("The plugin executable is missing.".into());
             }
             locked(client, |state, dir| {
-                if state.contains_key(&manifest.id) {
+                if state.contains_key(&manifest.id) && !replace {
                     return Err(
-                        "The plugin is already installed. Remove the existing plugin before installing it.".into(),
+                        "The plugin is already installed. Use --replace to update it and preserve settings.".into(),
                     );
                 }
                 let canonical_source = package.canonicalize().map_err(|e| e.to_string())?;
@@ -316,18 +337,29 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
                     return Err(e);
                 }
                 let target = dir.join(&manifest.id);
+                let previous = dir.join(format!(".previous-{}", uuid::Uuid::new_v4()));
                 if target.exists() {
-                    fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+                    fs::rename(&target, &previous).map_err(|e| e.to_string())?;
                 }
-                fs::rename(staging, target).map_err(|e| e.to_string())?;
+                if let Err(error) = fs::rename(&staging, &target) {
+                    if previous.exists() {
+                        let _ = fs::rename(&previous, &target);
+                    }
+                    let _ = fs::remove_dir_all(&staging);
+                    return Err(error.to_string());
+                }
+                let prior = state.get(&manifest.id);
                 let installed = Installed {
                     manifest: manifest.clone(),
-                    enabled: false,
+                    enabled: prior.is_some_and(|entry| entry.enabled),
                     generation: uuid::Uuid::new_v4().to_string(),
-                    config: json!({}),
+                    config: prior.map(|entry| entry.config.clone()).unwrap_or(json!({})),
                 };
                 let info = entry_info(&installed);
                 state.insert(manifest.id.clone(), installed);
+                if previous.exists() {
+                    let _ = fs::remove_dir_all(previous);
+                }
                 Ok(info)
             })
         })(),
@@ -335,10 +367,17 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
             id,
             executable,
             config,
+            expected_generation,
         } => locked(client, |state, _| {
             let entry = state
                 .get_mut(id)
                 .ok_or("PLUGIN_NOT_INSTALLED: Install the plugin first.")?;
+            if expected_generation
+                .as_ref()
+                .is_some_and(|expected| expected != &entry.generation)
+            {
+                return Err("CONFLICT: Connection settings changed. Try connecting again.".into());
+            }
             if entry.manifest.protocol_version != 1 {
                 return Err("PLUGIN_INCOMPATIBLE: Protocol versions do not match.".into());
             }
@@ -415,14 +454,7 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
     };
     match result {
         Ok(value) => success(request_id, value),
-        Err(message) => {
-            let code = message
-                .split(':')
-                .next()
-                .filter(|s| s.starts_with("PLUGIN_"))
-                .unwrap_or("PLUGIN_ERROR");
-            failure(request_id, code, &message)
-        }
+        Err(message) => plugin_error(request_id, message),
     }
 }
 
@@ -432,6 +464,7 @@ fn invoke_plugin(
     method: &str,
     params: &Value,
     request_id: &str,
+    setup: bool,
 ) -> Result<Value> {
     crate::cancellation::check()?;
     let dir = ensure(client)?;
@@ -469,7 +502,7 @@ fn invoke_plugin(
             crate::cancellation::check()?;
             if !state
                 .get(id)
-                .is_some_and(|p| p.enabled && p.generation == entry.generation)
+                .is_some_and(|p| (setup || p.enabled) && p.generation == entry.generation)
             {
                 return Err("PLUGIN_DISABLED: The plugin is disabled.".into());
             }
@@ -503,7 +536,7 @@ fn invoke_plugin(
             crate::cancellation::check()?;
             if !registry(client)?
                 .get(id)
-                .is_some_and(|p| p.enabled && p.generation == entry.generation)
+                .is_some_and(|p| (setup || p.enabled) && p.generation == entry.generation)
             {
                 return Err(
                     "PLUGIN_DISABLED: The plugin was disabled or removed during execution.".into(),
@@ -554,6 +587,78 @@ fn invoke_plugin(
     })();
     let _ = fs::remove_dir_all(run_dir);
     result
+}
+
+fn setup(
+    client: &Client,
+    id: &str,
+    method: &str,
+    params: Value,
+    request_id: &str,
+    expected_generation: Option<&str>,
+) -> Value {
+    if !params.is_object()
+        || serde_json::to_vec(&params).map_or(true, |bytes| bytes.len() > 1024 * 1024)
+    {
+        return failure(
+            request_id,
+            "INVALID_PARAMS",
+            "Setup input must be an object of at most 1 MiB.",
+        );
+    }
+    let entry = match registry(client).and_then(|state| {
+        state
+            .get(id)
+            .cloned()
+            .ok_or("The plugin is not installed.".into())
+    }) {
+        Ok(entry) => entry,
+        Err(error) => return failure(request_id, "PLUGIN_NOT_INSTALLED", error),
+    };
+    if entry.manifest.protocol_version != 1 {
+        return failure(
+            request_id,
+            "PLUGIN_INCOMPATIBLE",
+            "Protocol versions do not match.",
+        );
+    }
+    if expected_generation.is_some_and(|expected| expected != entry.generation) {
+        return failure(
+            request_id,
+            "CONFLICT",
+            "Connection settings changed. Try connecting again.",
+        );
+    }
+    if !entry
+        .manifest
+        .setup_methods
+        .iter()
+        .any(|name| name == method)
+    {
+        return failure(
+            request_id,
+            "PLUGIN_METHOD_NOT_FOUND",
+            "This plugin does not provide that connection step.",
+        );
+    }
+    let result = (|| -> Result<Value> {
+        crate::cancellation::install()?;
+        let response = invoke_plugin(client, &entry, method, &params, request_id, true)?;
+        if let Some(requests) = response.get("requests") {
+            if !requests.as_array().is_some_and(|items| items.is_empty()) {
+                return Err(
+                    "PLUGIN_PERMISSION_DENIED: Connection setup cannot change board data.".into(),
+                );
+            }
+        }
+        Ok(
+            json!({"plugin_id":id,"generation":entry.generation,"config":entry.config,"result":response.get("result").cloned().unwrap_or(json!({}))}),
+        )
+    })();
+    match result {
+        Ok(value) => success(request_id, value),
+        Err(error) => plugin_error(request_id, error),
+    }
 }
 
 fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str) -> Value {
@@ -674,7 +779,8 @@ fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str)
                     "socket": client.socket
                 });
             }
-            let response = invoke_plugin(client, &entry, method, &execution_params, request_id)?;
+            let response =
+                invoke_plugin(client, &entry, method, &execution_params, request_id, false)?;
             crate::cancellation::check()?;
             if let Some(ticket) = &ticket {
                 ticket.prepare(&json!({"generation":entry.generation,"response":response}))?;
@@ -794,13 +900,25 @@ pub fn rpc(client: &Client, method: &str, params: Value, request_id: &str) -> Va
     let command = match method {
         "plugin.list" => PluginCommand::List,
         "plugin.config" => PluginCommand::Config { id },
+        "plugin.setup" => {
+            return setup(
+                client,
+                &id,
+                params["method"].as_str().unwrap_or("discover"),
+                params.get("params").cloned().unwrap_or(json!({})),
+                request_id,
+                params["expected_generation"].as_str(),
+            )
+        }
         "plugin.install" => PluginCommand::Install {
             package: PathBuf::from(params["path"].as_str().unwrap_or("")),
+            replace: params["replace"].as_bool().unwrap_or(false),
         },
         "plugin.enable" => PluginCommand::Enable {
             id,
             executable: params["executable"].as_str().map(str::to_owned),
             config: params.get("config").map(Value::to_string),
+            expected_generation: params["expected_generation"].as_str().map(str::to_owned),
         },
         "plugin.disable" => PluginCommand::Disable { id },
         "plugin.remove" => PluginCommand::Remove { id },

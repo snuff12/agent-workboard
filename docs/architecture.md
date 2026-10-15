@@ -43,7 +43,7 @@ Never store the board database or widget snapshot in `amem/.state`. That directo
 
 The core creates/searches tasks and subtasks, assigns work, resumes runs, attaches artifacts, backs up, and exports without plugins. Ordinary file and URL attachments require no external integration identifiers.
 
-The core distribution includes only the shared extension boundary. Ship integration executables, libraries, and runtimes separately. Uninstalled or disabled plugins do not load/execute code, discover executables, access accounts, synchronize, or run background work. The core build and runtime require neither Python nor an email account.
+The core distribution includes only the shared extension boundary. Ship integration executables, libraries, and runtimes separately. Uninstalled plugins do not run. Disabled plugins run only manifest-declared setup steps after the user opens a connection flow; setup cannot modify board data or enable the plugin. Normal startup, lists, and disabled runtime calls do not discover tools, access accounts, or synchronize. The core build and runtime require neither Python nor an email account.
 
 Plugins modify tasks only through the service contract. They neither write the database directly nor create another task source of truth. The service applies the same assignment, revision, and retry-ID checks as core operations.
 

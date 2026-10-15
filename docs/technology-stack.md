@@ -19,7 +19,7 @@ Implement the workboard core and CLI in Rust, with Swift technologies for the Ma
 | Mac-specific UI | AppKit where needed | Menu bar, small persistent windows, and window control. |
 | Desktop widget | WidgetKit, App Intents | Current work, upcoming tasks, review requests, configurable views. |
 | Widget data | App Groups, JSON snapshots | Read only display data; include database sequence and generation time. |
-| Plugin host | Separate executable packages, standard-input/output JSON, manifests, journal | Keep integration code optional, avoid execution while absent/disabled, and isolate failures. |
+| Plugin host | Separate executable packages, standard-input/output JSON, manifests, journal | Keep integration code optional, avoid automatic execution while absent/disabled; permit explicit connection setup, and isolate failures. |
 | agent-memory | User-configured amem CLI | Reuse existing search and memory policies; separately packaged and disabled by default. |
 | Google Workspace | Python standard library, Google REST APIs, Desktop OAuth/PKCE, Keychain | Separate Calendar/Gmail implementation, permissions, and authentication from the core; choose scopes per service. |
 | Slack | Python standard library, Slack Web API, imported User OAuth Token, Keychain | Separate search/reading/attachments and explicitly enabled sending; journal retries. |

@@ -6,10 +6,12 @@ The optional plugin requires Orca app/CLI and Python 3. The core contains neithe
 
 ## Installation and app workflow
 
+After installing, choose **Connect** in plugin settings. The connection step detects the CLI in standard installation locations or the saved custom path and reads Orca's registered repositories. A unique match for the selected board project's directory is selected automatically; otherwise choose a project by name. No executable path or `id:` selector is required in the normal flow. The user-requested connection can open Orca if needed. Advanced settings retain custom paths and selectors.
+
 ```sh
 scripts/package-plugins.sh
-unzip dist/AgentWorkboard-plugin-orca-0.1.0.zip -d /tmp/workboard-orca
-workboard plugin install /tmp/workboard-orca/orca-0.1.0
+unzip dist/AgentWorkboard-plugin-orca-0.2.0.zip -d /tmp/workboard-orca
+workboard plugin install /tmp/workboard-orca/orca-0.2.0
 workboard plugin enable orca --executable /path/to/orca \
   --config '{"repo":"path:/path/to/registered-repo"}'
 workboard plugin check orca --json

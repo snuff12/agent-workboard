@@ -6,9 +6,11 @@ After installation and enabling, the plugin uses the amem CLI for external memor
 
 ## Setup and disconnection
 
+Choose **Connect** in plugin settings to detect the installed amem CLI and check its help output. Confirm the connection to enable it. This does not search collections, read sources, synchronize indexes, or capture memory. Custom executable selection remains in Advanced settings.
+
 Configure an executable path when enabling the integration; never hardcode a particular user's path. Core users need no memory configuration.
 
-Extract `AgentWorkboard-plugin-agent-memory-0.1.0.zip`. Select the `agent-memory-0.1.0` directory containing `plugin.json` and `plugin.py` in the app, or pass that directory to the CLI. Do not install the ZIP itself. Rebuild packages with `scripts/package-plugins.sh`. Installation alone leaves the plugin disabled.
+Extract `AgentWorkboard-plugin-agent-memory-0.2.0.zip`. Select the `agent-memory-0.2.0` directory containing `plugin.json` and `plugin.py` in the app, or pass that directory to the CLI. Do not install the ZIP itself. Rebuild packages with `scripts/package-plugins.sh`. Installation alone leaves the plugin disabled.
 
 ```sh
 workboard plugin install ./plugins/agent-memory
@@ -20,7 +22,7 @@ workboard plugin disable agent-memory
 | State | Behavior |
 | --- | --- |
 | Not installed | No integration code/dependencies in the core; no loading or external executable discovery. |
-| Disabled | No executable discovery/invocation or memory configuration/data reads; core tasks remain available. |
+| Disabled | Normal calls do not execute. Explicit Connect detects the CLI without searching sources or saving memory; core tasks remain available. |
 | Enabled | Only requested searches/reads and explicitly selected memory captures. |
 | Connection failure | Show an integration error and last verified state; preserve core CLI/app/widget workflows. |
 | Disconnected | Stop new external calls; preserve tasks, artifacts, evidence locations, and last verification metadata. |

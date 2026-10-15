@@ -88,12 +88,13 @@ def token_request(data):
 
 
 def credentials(config):
-    filename = config.get("credentials_file") or config.get("credential_file")
-    if not filename:
-        raise IntegrationError("Set credentials_file to the Google Desktop OAuth client JSON path.")
-    data = json.loads(Path(filename).expanduser().read_text())
-    client = data.get("installed")
-    if not client or not client.get("client_id"):
+    filename = config.get("credentials_file") or config.get("credential_file") or Path(__file__).with_name("oauth-client.json")
+    try:
+        data = json.loads(Path(filename).expanduser().read_text())
+    except (OSError, ValueError):
+        raise IntegrationError("Google sign-in is not configured in this plugin build. Install a Workspace plugin with the publisher's OAuth client.", "AUTHORIZATION_REQUIRED") from None
+    client = data.get("installed") if isinstance(data, dict) else None
+    if not isinstance(client, dict) or not isinstance(client.get("client_id"), str) or not client["client_id"].strip():
         raise IntegrationError("An OAuth client JSON file for a Desktop app is required.")
     return client
 
@@ -127,7 +128,7 @@ def authorize(config, account):
         url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
             "client_id": client["client_id"], "redirect_uri": redirect, "response_type": "code",
             "scope": " ".join(selected), "state": state, "code_challenge": challenge,
-            "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent"})
+            "code_challenge_method": "S256", "access_type": "offline", "prompt": "consent select_account"})
         subprocess.run(["/usr/bin/open", url], check=True, capture_output=True)
         deadline = time.monotonic() + 150
         while not received and time.monotonic() < deadline:
@@ -141,6 +142,7 @@ def authorize(config, account):
     if not set(selected).issubset(granted):
         raise IntegrationError("Not all permissions for the selected features were granted. Check connection settings.")
     token["workspace_scopes"] = sorted(granted)
+    token["workspace_client_id"] = client["client_id"]
     token["expires_at"] = time.time() + token.get("expires_in", 3600)
     keychain(account, token)
     return {"connected": True, "calendar_enabled": enabled(config, "calendar"),
@@ -157,6 +159,8 @@ def access_token(config, account):
         if not token.get("refresh_token"):
             raise IntegrationError("Workspace authentication expired. Reconnect the account.")
         client = credentials(config)
+        if token.get("workspace_client_id", client["client_id"]) != client["client_id"]:
+            raise IntegrationError("Google sign-in settings changed. Reconnect your account.", "AUTHORIZATION_REQUIRED")
         updated = token_request({"client_id": client["client_id"], "client_secret": client.get("client_secret", ""),
             "refresh_token": token["refresh_token"], "grant_type": "refresh_token"})
         token.update(updated)
@@ -473,12 +477,29 @@ def run(request):
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
     if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("config and params must be JSON objects.", "INVALID_REQUEST")
+    if method == "authorize" and "connection_config" in params:
+        choices = params["connection_config"]
+        if not isinstance(choices, dict) or set(choices) - {"account", "calendar_enabled", "gmail_enabled"}:
+            raise IntegrationError("Check the selected Google services.", "INVALID_REQUEST")
+        config = {**config, **choices}
+    if method == "discover":
+        try:
+            credentials(config)
+            ready, message = True, "Sign in with Google to connect your calendar."
+        except IntegrationError as error:
+            ready, message = False, str(error)
+        return {"ok": True, "result": {"available": ready, "message": message,
+            "config": {"account": str(config.get("account") or "default"),
+                       "calendar_enabled": config.get("calendar_enabled", True) is True,
+                       "gmail_enabled": config.get("gmail_enabled", False) is True}}}
     account = str(config.get("account", "default"))
     if method == "disconnect":
         keychain(account, remove=True)
         return {"ok": True, "result": {"connected": False}}
     if method == "authorize":
-        return {"ok": True, "result": authorize(config, account)}
+        result = authorize(config, account)
+        result["config"] = {"account": account, "calendar_enabled": enabled(config, "calendar"), "gmail_enabled": enabled(config, "gmail")}
+        return {"ok": True, "result": result}
     if method not in METHODS and method != "check":
         raise IntegrationError("Unsupported feature.", "INVALID_REQUEST")
     scopes(config)

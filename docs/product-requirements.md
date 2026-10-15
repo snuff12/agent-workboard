@@ -30,7 +30,7 @@ First run asks only for information needed to create projects and tasks. Plugin 
 | Core | Tasks and subtasks, deadlines and schedules, runs, CLI, personalized kanban app, widget, task search, file/URL attachments, backups, exports |
 | Separate plugins | agent-memory, Google Workspace, Slack, Orca, and future external services |
 
-The core contains only plugin state management and the shared request boundary. Uninstalled or disabled plugins must not load or execute code, discover executables, access accounts, synchronize, or run background work.
+The core contains only plugin state management and the shared request boundary. Uninstalled plugins never execute. A disabled plugin may run declared setup steps only after an explicit connection action. Setup can detect local tools or authenticate the selected account, but cannot modify board data or enable itself. Startup, lists, and ordinary disabled calls do not discover tools, read accounts, or synchronize.
 
 Disabling or removing a plugin preserves tasks, subtasks, artifacts, evidence paths, and last verified metadata. Reading external content again requires an installed, enabled plugin. Measure installation size, startup time, and idle memory to check that optional integrations do not impose costs on core users. Establish numeric budgets from the first prototype.
 
@@ -119,7 +119,7 @@ Verify actual Calendar/Gmail authentication and API behavior with a prepared OAu
 
 1. After installation, enabling, and path configuration, search amem evidence and verify original paths and locations.
 2. Even while enabled, save only decisions explicitly requested by the user as memory candidates.
-3. While disabled, do not discover/invoke executables, search memories, or synchronize.
+3. While disabled, do not search memories or synchronize. Explicit connection setup may detect the amem executable and check its help output, without reading sources or capturing memory.
 4. Missing executables, errors, and timeouts do not disrupt task creation/editing/search/resume, app, or widget.
 5. Disconnection preserves tasks, artifacts, and evidence links. External rereads require reconnection.
 

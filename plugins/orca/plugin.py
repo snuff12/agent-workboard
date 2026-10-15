@@ -33,12 +33,12 @@ def bounded_integer(params, key, default, maximum):
 
 
 class Orca:
-    def __init__(self, config):
+    def __init__(self, config, require_repo=True):
         self.executable = required(config, "executable")
         if not Path(self.executable).is_absolute():
             raise IntegrationError("Specify the absolute path to the Orca executable.", "PLUGIN_INVALID_PARAMS")
-        self.repo = required(config, "repo")
-        if not any(self.repo.startswith(prefix) and self.repo[len(prefix):].strip()
+        self.repo = config.get("repo", "")
+        if require_repo and not any(self.repo.startswith(prefix) and self.repo[len(prefix):].strip()
                    for prefix in ("id:", "path:", "name:")):
             raise IntegrationError("repo must use an id:, path:, or name: selector.", "PLUGIN_INVALID_PARAMS")
         self.deadline = time.monotonic() + 24
@@ -223,6 +223,61 @@ def sync_directory(path):
         os.close(descriptor)
 
 
+def discover(config, params):
+    home = Path.home()
+    candidates = [config.get("executable"), str(home / ".local/bin/orca"),
+                  "/opt/homebrew/bin/orca", "/usr/local/bin/orca"]
+    for base in (home / "Applications", Path("/Applications")):
+        candidates.extend(str(base / "Orca.app/Contents" / suffix) for suffix in
+                          ("Resources/bin/orca", "MacOS/orca", "Resources/app/bin/orca"))
+    candidates.extend(str(Path(folder) / "orca") for folder in os.get_exec_path() if Path(folder).is_absolute())
+    executable = next((str(Path(value).expanduser()) for value in dict.fromkeys(filter(None, candidates))
+                       if Path(value).expanduser().is_absolute() and Path(value).expanduser().is_file()
+                       and os.access(Path(value).expanduser(), os.X_OK)), None)
+    if not executable:
+        return {"ok": True, "result": {"available": False, "config": {},
+            "message": "Install Orca, then try again. Advanced settings supports custom CLI paths."}}
+    orca = Orca({**config, "executable": executable}, require_repo=False)
+    try:
+        response = orca.call("repo", "list")
+    except IntegrationError:
+        if params.get("launch_app") is not True:
+            raise
+        subprocess.run(["/usr/bin/open", "-a", "Orca"], check=True, capture_output=True, timeout=5)
+        # Launch is explicit in the connection flow. Never open Orca from core startup.
+        deadline = time.monotonic() + 8
+        while True:
+            try:
+                response = orca.call("repo", "list")
+                break
+            except IntegrationError:
+                if time.monotonic() >= deadline:
+                    raise IntegrationError("Orca is starting. Try connecting again in a moment.") from None
+                time.sleep(0.25)
+    rows = response.get("repos")
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise IntegrationError("Could not read Orca's registered repositories.", "PLUGIN_INVALID_RESPONSE")
+    repositories = [{"id": required(row, "id"), "name": row.get("displayName") or required(row, "path"),
+                     "path": required(row, "path")} for row in rows
+                    if isinstance(row, dict) and row.get("hostId", "local") in (None, "local")
+                    and isinstance(row.get("path"), str) and Path(row["path"]).is_absolute()]
+    selected = next((row for row in repositories if config.get("repo") in
+                     ("id:" + row["id"], "path:" + row["path"])), None)
+    paths = params.get("project_paths", [])
+    if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
+        raise IntegrationError("project_paths must be an array of paths.", "PLUGIN_INVALID_PARAMS")
+    matches = [row for row in repositories if any(Path(path).expanduser().resolve() ==
+               Path(row["path"]).resolve() for path in paths if path)]
+    if selected is None:
+        selected = matches[0] if len(matches) == 1 else repositories[0] if len(repositories) == 1 else None
+    settings = {"executable": executable}
+    if selected:
+        settings["repo"] = "id:" + selected["id"]
+    return {"ok": True, "result": {"available": bool(repositories), "config": settings,
+        "repositories": repositories, "message": "Choose a repository to connect." if repositories
+        else "Add a local repository in Orca, then try again."}}
+
+
 def run(request):
     if not isinstance(request, dict) or request.get("protocol_version") != 1:
         raise IntegrationError("Unsupported plugin protocol.", "PLUGIN_INVALID_PARAMS")
@@ -230,6 +285,8 @@ def run(request):
     if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("config and params must be objects.", "PLUGIN_INVALID_PARAMS")
     method = request.get("method")
+    if method == "discover":
+        return discover(config, params)
     methods = {"check", "worktrees.list", "worktrees.get", "worktrees.import", "worktrees.attach", "terminals.list", "terminals.read", "agents.start"}
     if method not in methods:
         raise IntegrationError("Unsupported Orca feature.", "PLUGIN_METHOD_NOT_FOUND")

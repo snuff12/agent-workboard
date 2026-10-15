@@ -17,6 +17,8 @@ Use service `task.create`/`task.attach` requests; never direct database access. 
 
 ## Installation and authentication
 
+The normal **Connect** flow accepts a User OAuth token in a secure field and discovers its workspace with `auth.test`. It no longer requires a token JSON file, account label, or workspace ID. A private temporary file transfers the token to the provider, is deleted after the request, and is never placed in CLI arguments, the registry, or a retry journal. The token is saved in Keychain after workspace validation. Sending remains disabled unless separately enabled. Browser OAuth still requires a publisher-owned Slack app and a confidential token-exchange service; this build does not claim browser sign-in for Slack.
+
 Requires Python 3.9+ and macOS Keychain, with no pip dependencies. Authentication imports a user-created app's **User OAuth Token (`xoxp-`)**. Browser installation OAuth and automatic token refresh are not implemented. Bot/App tokens cannot authenticate search.
 
 1. Create an internal workspace app at [Slack app management](https://api.slack.com/apps); follow organization approval requirements.
@@ -42,7 +44,7 @@ workboard plugin run slack authorize
 workboard plugin check slack
 ```
 
-Build `dist/AgentWorkboard-plugin-slack-0.1.0.zip` with `scripts/package-plugins.sh`. Extract and select `slack-0.1.0` in the app/CLI, not the ZIP itself.
+Build `dist/AgentWorkboard-plugin-slack-0.2.0.zip` with `scripts/package-plugins.sh`. Extract and select `slack-0.2.0` in the app/CLI, not the ZIP itself.
 
 Installation leaves the plugin disabled. `messages_enabled`/`send_enabled` require Boolean `true`, not `"true"` or `1`. Sending requires both features enabled.
 

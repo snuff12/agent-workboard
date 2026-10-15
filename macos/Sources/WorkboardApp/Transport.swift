@@ -47,13 +47,22 @@ actor WorkboardClient {
         let errorHandle = try FileHandle(forWritingTo: errorURL)
         defer { try? errorHandle.close() }
         process.standardError = errorHandle
+        try Task.checkCancellation()
         do { try process.run() }
         catch { throw WorkboardError(message: "Could not connect to the task service. Check the workboard executable in Settings.\n\(error.localizedDescription)") }
         let running = RunningProcess(process)
         let timeout = DispatchWorkItem { if running.process.isRunning { running.process.terminate() } }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit(); timeout.cancel()
+        defer { timeout.cancel() }
+        let data = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            try Task.checkCancellation()
+            return data
+        } onCancel: {
+            if running.process.isRunning { running.process.terminate() }
+        }
         guard !data.isEmpty else {
             let stderr = (try? String(contentsOf: errorURL, encoding: .utf8)) ?? ""
             throw WorkboardError(message: stderr.isEmpty ? "No response from the service. Check its status before retrying." : String(stderr.prefix(2000)))

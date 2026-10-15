@@ -1,13 +1,44 @@
 {
   "id": "google-workspace",
   "name": "Google Workspace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocol_version": 1,
+  "setup_methods": ["discover", "authorize"],
   "executable": "plugin.py",
-  "methods": ["check", "authorize", "disconnect", "calendar.list", "events.list", "events.get", "events.import", "events.pull", "events.create", "events.update", "gmail.search", "gmail.read", "gmail.import", "gmail.attach"],
-  "read_only_methods": ["check", "calendar.list", "events.list", "events.get", "gmail.search", "gmail.read"],
-  "task_context_methods": ["events.create", "events.update", "events.pull"],
-  "allowed_requests": ["task.create", "task.update", "task.attach"],
+  "methods": [
+    "check",
+    "authorize",
+    "disconnect",
+    "calendar.list",
+    "events.list",
+    "events.get",
+    "events.import",
+    "events.pull",
+    "events.create",
+    "events.update",
+    "gmail.search",
+    "gmail.read",
+    "gmail.import",
+    "gmail.attach"
+  ],
+  "read_only_methods": [
+    "check",
+    "calendar.list",
+    "events.list",
+    "events.get",
+    "gmail.search",
+    "gmail.read"
+  ],
+  "task_context_methods": [
+    "events.create",
+    "events.update",
+    "events.pull"
+  ],
+  "allowed_requests": [
+    "task.create",
+    "task.update",
+    "task.attach"
+  ],
   "timeout_seconds": 180,
   "description": "Connect Google Calendar events to tasks. Gmail reading is available only when enabled separately."
 }

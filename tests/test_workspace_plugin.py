@@ -65,6 +65,38 @@ class WorkspacePlugin(unittest.TestCase):
         with self.assertRaises(workspace.IntegrationError):
             workspace.scopes({"calendar_enabled": "false"})
 
+    def test_discovery_uses_packaged_desktop_client_without_keychain_or_network(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            location = Path(directory)
+            (location / "oauth-client.json").write_text(json.dumps({"installed": {"client_id": "publisher.apps.googleusercontent.com"}}))
+            with mock.patch.object(workspace, "__file__", str(location / "plugin.py")):
+                response = workspace.run({"method": "discover", "config": {}, "params": {}})["result"]
+                self.assertTrue(response["available"])
+                self.assertEqual(response["config"], {"account": "default", "calendar_enabled": True, "gmail_enabled": False})
+        self.keychain.assert_not_called()
+        self.urlopen.assert_not_called()
+
+    def test_missing_publisher_client_reports_setup_status_without_account_reads(self):
+        with mock.patch.object(workspace, "credentials", side_effect=workspace.IntegrationError("Publisher sign-in is unavailable")):
+            result = workspace.run({"method": "discover", "config": {}, "params": {}})["result"]
+        self.assertFalse(result["available"])
+        self.keychain.assert_not_called()
+        self.urlopen.assert_not_called()
+
+    def test_authorization_uses_selected_services_before_enabling_plugin(self):
+        choices = {"account": "personal", "calendar_enabled": True, "gmail_enabled": False}
+        with mock.patch.object(workspace, "authorize", return_value={"connected": True}) as authorize:
+            response = workspace.run({"method": "authorize", "config": {}, "params": {"connection_config": choices}})
+        authorize.assert_called_once_with(choices, "personal")
+        self.assertEqual(response["result"]["config"], choices)
+
+    def test_connection_choices_cannot_inject_developer_credentials(self):
+        with self.assertRaises(workspace.IntegrationError):
+            workspace.run({"method": "authorize", "config": {}, "params": {"connection_config": {"credentials_file": "/untrusted/client.json"}}})
+        self.keychain.assert_not_called()
+        self.urlopen.assert_not_called()
+
     def test_disabled_service_has_no_keychain_or_http_access(self):
         with self.assertRaises(workspace.IntegrationError) as error:
             self.run_method("gmail.search")
@@ -113,6 +145,7 @@ class WorkspacePlugin(unittest.TestCase):
             self.assertTrue(result["result"]["connected"])
             self.assertEqual(statuses, [400, 200])
             self.assertEqual(captured["code_challenge_method"], "S256")
+            self.assertEqual(captured["prompt"], "consent select_account")
             self.assertNotIn("gmail", captured["scope"])
             self.assertTrue(captured["redirect_uri"].startswith("http://127.0.0.1:"))
             verifier = exchange.call_args.args[0]["code_verifier"]

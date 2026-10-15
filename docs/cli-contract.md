@@ -151,6 +151,10 @@ The core ships without integrations. Installed plugins remain disabled. Return `
 
 Core `doctor` judges only core health. Absent/disabled/failed integrations do not fail it. Explicit `plugin check` checks enabled external connections. `plugin list` returns installation/enabled metadata without configuration. `plugin config <id>` / RPC `plugin.config {id}` returns `{id,config}`, including while disabled. Neither read starts the provider or task service.
 
+Explicit `plugin setup ID [METHOD] --params JSON` / RPC `plugin.setup {id,method,params,expected_generation?}` runs only a manifest-declared `setup_methods` entry; the default method is `discover`. It may run while the plugin is disabled and returns `{plugin_id,generation,config,result}`. It cannot apply any board request or enable the plugin. The host still enforces process, output, cancellation, removal, and configuration-generation checks. Use `plugin enable --expected-generation GENERATION` or the matching RPC parameter after successful discovery/authentication to reject stale connection settings. Setup does not start the board service. Ordinary `plugin run`, `plugin check`, list, config and startup behavior is unchanged.
+
+`plugin install PACKAGE --replace` / RPC `plugin.install {path,replace:true}` updates a trusted package while preserving its config and enabled state. New packages are still disabled by default. The host validates and stages the new package before replacing existing code, changes its generation to cancel old requests, and preserves the old executable if staging or replacement fails. The app's Install action uses this update path for an already installed plugin.
+
 Use identical `project`/`domain` parameters for scoped searches and reads. `--params` accepts a JSON object. Workspace, Slack, and Orca share lifecycle rules; see their guides for capabilities.
 
 ## Shared RPC and widget paths
@@ -213,7 +217,7 @@ The host sends `{protocol_version,request_id,method,params,config}` on stdin. Re
 
 An operation may include `idempotency_key`: a nonblank, NUL-free string of 1–200 bytes. The host hashes plugin ID plus key into a service request ID. Different top-level requests can retry the same operation; another plugin's same key remains distinct. Reusing a key with different method/parameters conflicts. Without a key, use parent request ID plus operation index. For attachment recovery after external execution, durably retain and return the original attachment parameters and key.
 
-The default timeout is 30 seconds; interactive OAuth may declare `timeout_seconds` up to 180. Absent/disabled code does not run. Disabling/removing terminates the active process group. Enforce output/package size and depth limits. Process isolation is for failure handling, not an OS security sandbox for arbitrary untrusted programs. Install only trusted plugins.
+The default timeout is 30 seconds; interactive OAuth may declare `timeout_seconds` up to 180. Absent code never runs. Disabled runtime calls do not execute; explicit manifest-declared setup is separate. Disabling/removing terminates the active process group. Enforce output/package size and depth limits. Process isolation is for failure handling, not an OS security sandbox for arbitrary untrusted programs. Install only trusted plugins.
 
 On SIGINT/SIGTERM, terminate the provider's process-group descendants and stop new core mutations. This does not roll back external writes; retain pending/prepared journals. SIGKILL, power loss, and children deliberately escaping the process group are outside this signal-cleanup guarantee.
 

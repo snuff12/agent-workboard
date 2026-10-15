@@ -17,8 +17,10 @@ import Darwin
         try themeFilesAndFreshProcess()
         try connectionIdentities()
         try pluginConfigurationValues()
+        try pluginConnectionDiscovery()
         try slackContract()
         try await rpcArgumentsAndErrors()
+        try await rpcCancellation()
         if let executable = ProcessInfo.processInfo.environment["WORKBOARD_BIN"], !executable.isEmpty {
             try await actualService(executable)
             try await connectionSwitchRecoveryAndPluginConfig(executable)
@@ -38,6 +40,48 @@ import Darwin
         try require(WorkboardAppGroup.resolve("TEAM123456.group.local.agentworkboard.shared") == "TEAM123456.group.local.agentworkboard.shared", "Signed Team App Group identifier was changed")
         try require(WorkboardAppGroup.resolve("  TEAM123456.custom.workboard \n") == "TEAM123456.custom.workboard", "Configured App Group identifier did not trim whitespace")
         print("✓ App Group Info.plist configuration: Team ID preservation and default restoration verified")
+    }
+    static func pluginConnectionDiscovery() throws {
+        let saved = JSONValue.object(["future_option": .bool(true), "account": .string("personal")])
+        let found = PluginDiscovery(.object(["available": .bool(true), "config": .object(["executable": .string("/detected/orca"), "repo": .string("id:one")]),
+            "repositories": .array([.object(["id": .string("one"), "name": .string("Project"), "path": .string("/project")])])]), saved: saved)
+        let config = try found.configuration(pluginID: "orca", repository: "id:one", calendar: false, gmail: false)
+        try require(config["executable"]?.string == "/detected/orca" && config["future_option"]?.bool == true, "Discovery lost a detected path or advanced setting")
+        do { _ = try found.configuration(pluginID: "orca", repository: "id:foreign", calendar: false, gmail: false); throw Failure(description: "An undetected repository was accepted") }
+        catch is WorkboardError { }
+        do { _ = try found.configuration(pluginID: "google-workspace", repository: "", calendar: false, gmail: false); throw Failure(description: "No-service Google connection was accepted") }
+        catch is WorkboardError { }
+        let google = try found.configuration(pluginID: "google-workspace", repository: "", calendar: true, gmail: false)
+        try require(google["calendar_enabled"]?.bool == true && google["gmail_enabled"]?.bool == false && google["account"]?.string == "personal", "Google service choices or account were lost")
+        let unready = PluginDiscovery(.object(["available": .string("true")]), saved: .object([:]))
+        try require(!unready.available, "String flag enabled a connection")
+        print("✓ Plugin discovery: local selection, advanced settings, and Google service choices verified")
+    }
+    static func rpcCancellation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("workboard-cancel-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("slow-cli"), marker = directory.appendingPathComponent("started")
+        let script = "#!/usr/bin/python3\nimport os,time\nopen(\(String(reflecting: marker.path)), 'w').write(str(os.getpid()))\ntime.sleep(20)\n"
+        try script.write(to: executable, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        var configuration = ConnectionConfiguration(); configuration.executablePath = executable.path; configuration.sharesWidgetSnapshot = false
+        let selected = configuration
+        let client = WorkboardClient()
+        let request = Task { try await client.call("plugin.setup", configuration: selected) }
+        for _ in 0..<150 {
+            if FileManager.default.fileExists(atPath: marker.path) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        try require(FileManager.default.fileExists(atPath: marker.path), "Cancellation probe did not start")
+        let start = Date()
+        request.cancel()
+        do { _ = try await request.value; throw Failure(description: "Cancelled connection returned success") }
+        catch is CancellationError { }
+        try require(Date().timeIntervalSince(start) < 3, "Cancelling a connection waited for the external timeout")
+        let pid = Int32((try String(contentsOf: marker, encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
+        try require(kill(pid, 0) != 0, "Cancelled CLI process is still running")
+        print("✓ Connection cancellation stops the CLI process promptly")
     }
     static func calendarContract() throws {
         let data = Data(#"{"id":"event","summary":"Design meeting","description":"Item to check","htmlLink":"https://calendar.google.com/event/123","etag":"version-2","start":{"dateTime":"2026-10-15T09:00:00+09:00","timeZone":"Asia/Seoul"},"end":{"dateTime":"2026-10-15T10:00:00+09:00"}}"#.utf8)

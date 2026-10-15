@@ -11,11 +11,13 @@ struct InstalledPlugin: Identifiable {
     let enabled: Bool
     let compatible: Bool
     let methods: [String]
+    let setupMethods: [String]
     init?(_ json: JSONValue) {
         guard let id = json["id"].string else { return nil }
         self.id = id; name = json["name"].string ?? id; version = json["version"].string ?? ""
         description = json["description"].string ?? ""; enabled = json["enabled"].bool ?? false
         compatible = json["compatible"].bool ?? false; methods = json["methods"].array.compactMap(\.string)
+        setupMethods = json["setup_methods"].array.compactMap(\.string)
     }
 }
 
@@ -25,9 +27,10 @@ struct InstalledPlugin: Identifiable {
     @Published var notice: String?
     @Published var busy = false
     private let client = WorkboardClient() // Slow plugins never queue core board requests.
-    func reload(configuration: ConnectionConfiguration) async {
-        do { let result = try await client.call("plugin.list", configuration: configuration); entries = result["plugins"].array.compactMap(InstalledPlugin.init); error = nil }
-        catch { self.error = error.localizedDescription }
+    func reload(configuration: ConnectionConfiguration, isCurrent: () -> Bool = { true }) async {
+        guard isCurrent() else { return }
+        do { let result = try await client.call("plugin.list", configuration: configuration); guard isCurrent() else { return }; entries = result["plugins"].array.compactMap(InstalledPlugin.init); error = nil }
+        catch { if isCurrent() { self.error = error.localizedDescription } }
     }
     func call(_ method: String, params: [String: JSONValue], configuration: ConnectionConfiguration, requestID: String? = nil, isCurrent: () -> Bool = { true }) async -> JSONValue? {
         guard !busy, isCurrent() else { return nil }
@@ -51,6 +54,8 @@ struct PluginSettingsView: View {
     @EnvironmentObject private var board: BoardStore
     @StateObject private var plugins = PluginStore()
     @State private var configuring: InstalledPlugin?
+    @State private var connecting: InstalledPlugin?
+    @State private var advancedAfterConnection: InstalledPlugin?
     @State private var using: InstalledPlugin?
     @State private var removing: InstalledPlugin?
     var body: some View {
@@ -68,11 +73,12 @@ struct PluginSettingsView: View {
                                 VStack(alignment: .leading, spacing: 3) { HStack { Text(plugin.name).font(.callout.weight(.semibold)); Text(plugin.version).font(.caption2).foregroundStyle(.tertiary) }; Text(plugin.enabled ? "Enabled" : "Disabled").font(.caption2).foregroundStyle(plugin.enabled ? .green : .secondary) }
                                 Spacer()
                                 if plugin.enabled { Button("Use…") { using = plugin }.disabled(plugins.busy) }
-                                Button(plugin.enabled ? "Disable" : "Configure and enable…") {
-                                    if plugin.enabled { Task { _ = await plugins.call("plugin.disable", params: ["id": .string(plugin.id)], configuration: appearance.connection); await plugins.reload(configuration: appearance.connection) } }
+                                Button(plugin.setupMethods.contains("discover") ? "Connect…" : plugin.enabled ? "Disable" : "Configure and enable…") {
+                                    if plugin.setupMethods.contains("discover") { connecting = plugin }
+                                    else if plugin.enabled { Task { _ = await plugins.call("plugin.disable", params: ["id": .string(plugin.id)], configuration: appearance.connection); await plugins.reload(configuration: appearance.connection) } }
                                     else { configuring = plugin }
                                 }.disabled(plugins.busy || !plugin.compatible)
-                                Menu { Button("Settings…") { configuring = plugin }; Button("Check connection") { Task { if await plugins.run(plugin, method: "check", configuration: appearance.connection) != nil { plugins.notice = "Plugin connection verified." } } }.disabled(!plugin.enabled); Divider(); Button("Remove…", role: .destructive) { removing = plugin } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 18).disabled(plugins.busy)
+                                Menu { if !plugin.setupMethods.isEmpty && plugin.enabled { Button("Disable") { Task { _ = await plugins.call("plugin.disable", params: ["id": .string(plugin.id)], configuration: appearance.connection); await plugins.reload(configuration: appearance.connection) } } }; Button("Advanced settings…") { configuring = plugin }; Button("Check connection") { Task { if await plugins.run(plugin, method: "check", configuration: appearance.connection) != nil { plugins.notice = "Plugin connection verified." } } }.disabled(!plugin.enabled); Divider(); Button("Remove…", role: .destructive) { removing = plugin } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 18).disabled(plugins.busy)
                             }
                             if !plugin.description.isEmpty { Text(plugin.description).font(.caption).foregroundStyle(Color.secondary) }
                             if !plugin.compatible { Label("This protocol is incompatible with the app.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
@@ -86,6 +92,13 @@ struct PluginSettingsView: View {
             Text("Disabling or removing a plugin preserves tasks, subtasks, artifacts, and existing evidence links.").font(.caption2).foregroundStyle(Color.secondary)
         }.padding(12).task(id: appearance.connection.identity()) { await plugins.reload(configuration: appearance.connection) }
             .sheet(item: $configuring) { plugin in PluginConfigurationView(plugin: plugin, plugins: plugins) }
+            .sheet(item: $connecting, onDismiss: {
+                if let plugin = advancedAfterConnection { advancedAfterConnection = nil; configuring = plugin }
+            }) { plugin in
+                PluginConnectionView(plugin: plugin, plugins: plugins) {
+                    advancedAfterConnection = plugin
+                }
+            }
             .sheet(item: $using) { plugin in PluginBrowserView(plugin: plugin, plugins: plugins) }
             .confirmationDialog("Remove the ‘\(removing?.name ?? "")’ plugin?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
                 Button("Remove plugin", role: .destructive) { if let plugin = removing { Task { _ = await plugins.call("plugin.remove", params: ["id": .string(plugin.id)], configuration: appearance.connection); await plugins.reload(configuration: appearance.connection); removing = nil } } }
@@ -95,7 +108,7 @@ struct PluginSettingsView: View {
     private func install() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.message = "Choose a plugin package directory containing plugin.json."
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { if await plugins.call("plugin.install", params: ["path": .string(url.path)], configuration: appearance.connection) != nil { plugins.notice = "Installed. Configure and enable the plugin to use it."; await plugins.reload(configuration: appearance.connection) } }
+        Task { if let result = await plugins.call("plugin.install", params: ["path": .string(url.path), "replace": .bool(true)], configuration: appearance.connection) { plugins.notice = result["enabled"].bool == true ? "Plugin updated. Your connection settings were kept." : "Installed. Choose Connect to get started."; await plugins.reload(configuration: appearance.connection) } }
     }
 }
 

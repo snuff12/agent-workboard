@@ -44,6 +44,32 @@ class SlackPlugin(unittest.TestCase):
         return slack.run({"protocol_version": 1, "method": method, "params": params or {},
                           "config": self.config if config is None else config, "request_id": "slack-test"})
 
+    def test_connection_detects_workspace_and_never_returns_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "token.json"
+            path.write_text(json.dumps({"access_token": TOKEN}))
+            self.responses({"ok": True, "team_id": "T456", "user_id": "U123", "team": "Detected workspace"})
+            result = self.run_method("connect", {"credentials_file": str(path)}, config={})["result"]
+        self.assertEqual(result["config"], {"account": "default", "team_id": "T456", "messages_enabled": True, "send_enabled": False})
+        self.assertNotIn(TOKEN, json.dumps(result))
+        self.keychain.assert_called_once()
+        self.assertEqual(self.keychain.call_args.args[1]["team_id"], "T456")
+
+    def test_connection_rejects_a_different_saved_workspace_before_keychain_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "token.json"
+            path.write_text(json.dumps({"access_token": TOKEN}))
+            self.responses({"ok": True, "team_id": "T456", "user_id": "U123"})
+            with self.assertRaises(slack.IntegrationError):
+                self.run_method("connect", {"credentials_file": str(path)})
+        self.keychain.assert_not_called()
+
+    def test_discovery_does_not_access_slack_credentials(self):
+        result = self.run_method("discover", config={})["result"]
+        self.assertTrue(result["available"])
+        self.keychain.assert_not_called()
+        self.http.assert_not_called()
+
     def request(self, index=-1):
         return self.http.call_args_list[index].args[0]
 

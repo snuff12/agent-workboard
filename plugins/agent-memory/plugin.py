@@ -22,8 +22,25 @@ def scope_args(params):
             if params.get(key) for value in [flag, str(params[key])]]
 
 
+def discover(config):
+    home = Path.home()
+    candidates = [config.get("executable"), str(home / ".local/bin/amem"),
+                  str(home / ".cargo/bin/amem"), "/opt/homebrew/bin/amem", "/usr/local/bin/amem"]
+    candidates.extend(str(Path(folder) / "amem") for folder in os.get_exec_path() if Path(folder).is_absolute())
+    for value in dict.fromkeys(filter(None, candidates)):
+        path = Path(value).expanduser()
+        if path.is_absolute() and path.is_file() and os.access(path, os.X_OK):
+            invoke(str(path), ["--help"])
+            return {"ok": True, "result": {"available": True, "config": {"executable": str(path)},
+                "message": "Found the installed amem CLI. Ready to connect."}}
+    return {"ok": True, "result": {"available": False, "config": {},
+        "message": "Install agent-memory, then try again. You can also choose a custom path in Advanced settings."}}
+
+
 def run(request):
     params = request.get("params", {})
+    if request.get("method") == "discover":
+        return discover(request.get("config", {}))
     executable = request.get("config", {}).get("executable")
     if not executable:
         raise ValueError("Set the amem executable path in plugin configuration.")

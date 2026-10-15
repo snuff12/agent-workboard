@@ -1,8 +1,11 @@
 {
   "id": "agent-memory",
   "name": "agent-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocol_version": 1,
+  "setup_methods": [
+    "discover"
+  ],
   "executable": "plugin.py",
   "methods": [
     "check",

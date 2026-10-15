@@ -2,6 +2,14 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## Plugin connection setup
+
+On October 16, 2026, plugin connections gained explicit setup/discovery, a simple Connect screen, publisher-configured Google sign-in, and settings-preserving package updates. Rust 71 and Python 157 tests passed, together with clippy, Swift build/runners, release signing/plist checks, separate ZIP checks with and without Desktop OAuth metadata, and installer checks. New setup checks verify disabled-state isolation, no board/service side effects, generation conflicts, cancellation, local tool detection, and configuration preservation during package updates.
+
+The release app and all four 0.2.0 packages were installed on this Mac. Existing projects/tasks and saved plugin settings were preserved. Native settings clicks detected the installed amem CLI and connected it, and detected Orca plus the matching board repository and connected it without path/selector input. Installed CLI checks then verified both connections. The Google screen showed Calendar/Gmail choices and browser sign-in without a client-file field; Slack's normal flow uses a secure token field and detects its workspace.
+
+Google publisher registration is not yet complete: a dedicated Cloud project and the required APIs were prepared, but the consent configuration awaits the owner's Google API Services User Data Policy approval before Desktop client creation. No real Google OAuth login or Slack account operation was claimed. Native screenshots and redacted results are local under `.build/plugin-onboarding/`; user task text/tokens are not committed. See [connection design and research](plugin-onboarding.md).
+
 ## Plugin readiness audit
 
 The October 15, 2026 follow-up checked all four current plugin packages with an isolated board. Actual amem search/read/evidence attachment and Orca worktree browsing/import/attachment passed. Google Workspace and Slack passed mocked provider/host checks and real missing-credential isolation checks; authenticated account operations remain unverified. The audit also reproduced and fixed loss of the calendar time zone when importing date-only events. See the [plugin readiness report](plugin-readiness.md) for exact coverage and remaining checks.
