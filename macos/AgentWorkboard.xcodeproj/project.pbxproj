@@ -1,0 +1,654 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0CDD513B0C90C5E6F57AB4C2 /* GoogleWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */; };
+		0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */; };
+		18805D06D877A57D11F744ED /* WorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */; };
+		215B487D4151F345AE689BCF /* Transport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */; };
+		303A5E99B64CCAA663124CFC /* WorkboardWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E38EB964F346D621975A35F3 /* WorkboardWidgets.swift */; };
+		470BA772C986DFD934F50DFD /* Editors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421323AFC436573C1D629553 /* Editors.swift */; };
+		65A13717F06569BA783E0CB9 /* BoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED151705C40449FE3BDEA29 /* BoardStore.swift */; };
+		6AA77E9E2F9DE7A835861145 /* WorkboardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B094FB709613DE58EF7BE4A /* WorkboardApp.swift */; };
+		96C90BCDD27F591FF2DB1B46 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1F8F5F062D84CC40A97715D /* WidgetKit.framework */; };
+		A2F0327FF1DFD13E2A8FB0C9 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC040A659AF4AAA849F4151 /* AppGroup.swift */; };
+		A7FB31512596BC05E93C4FDC /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0171C8F0614A68C02905CF43 /* Appearance.swift */; };
+		AAF4089B7FB2D141137E8FF4 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1264FA2B4DE7D951AD317DE5 /* SwiftUI.framework */; };
+		B157690AA518A29B9D00D36B /* PluginViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EC551A72385D030AC1F5DD /* PluginViews.swift */; };
+		B2D2294E401D641916B318C4 /* WorkboardWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = DEE899CB83C91B978D8CB034 /* WorkboardWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C38163687B4EF789D9F50A69 /* QuickCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A880F06D49FE999CED11D18 /* QuickCapture.swift */; };
+		C73CEA24632C9857D10D87D3 /* WorkflowModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1549B509B53C8C7ED05DDAD /* WorkflowModels.swift */; };
+		CF58411B122946FD7CF0D778 /* WorkboardAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2A38D866298D31F8D9E8BEA /* WorkboardAppUITests.swift */; };
+		D2D4622ACE7F91EA1B03DA03 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 70F095D74D719F4116AE16CE /* AppIntents.framework */; };
+		E3588D43F9AAB74B867DBB4F /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC7DA5092DD6C83E8B7419BA /* BoardView.swift */; };
+		E677E684FE762D30BE6499D6 /* WeeklyPlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E28978FF98B9EBFB5A2941 /* WeeklyPlanner.swift */; };
+		F075C2F56334018CB932EC4C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40B26BEED20581CED11E4C4 /* Models.swift */; };
+		FF1CDEB00F26C86571CCF9C4 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1DF123D44B93F041502EC7FF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9C9DC104C9A37AE35EFCC08F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F1560DFB0D4FCBA3F434DD3A;
+			remoteInfo = WorkboardWidgets;
+		};
+		460574B364A780DBFE256BBD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9C9DC104C9A37AE35EFCC08F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 52B4601100E85428DE4C17B3;
+			remoteInfo = WorkboardApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		0D9B5F9B23ECC52F663BFE2B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B2D2294E401D641916B318C4 /* WorkboardWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0171C8F0614A68C02905CF43 /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
+		125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		1264FA2B4DE7D951AD317DE5 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowViews.swift; sourceTree = "<group>"; };
+		29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleWorkspaceView.swift; sourceTree = "<group>"; };
+		2CC040A659AF4AAA849F4151 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
+		3E356B927A706D3E6D6782CD /* WorkboardApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WorkboardApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		421323AFC436573C1D629553 /* Editors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Editors.swift; sourceTree = "<group>"; };
+		540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
+		5A880F06D49FE999CED11D18 /* QuickCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickCapture.swift; sourceTree = "<group>"; };
+		5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transport.swift; sourceTree = "<group>"; };
+		5ED151705C40449FE3BDEA29 /* BoardStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardStore.swift; sourceTree = "<group>"; };
+		64EC551A72385D030AC1F5DD /* PluginViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginViews.swift; sourceTree = "<group>"; };
+		70F095D74D719F4116AE16CE /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		79E28978FF98B9EBFB5A2941 /* WeeklyPlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyPlanner.swift; sourceTree = "<group>"; };
+		9B094FB709613DE58EF7BE4A /* WorkboardApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkboardApp.swift; sourceTree = "<group>"; };
+		A40B26BEED20581CED11E4C4 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		C1549B509B53C8C7ED05DDAD /* WorkflowModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowModels.swift; sourceTree = "<group>"; };
+		CC7DA5092DD6C83E8B7419BA /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
+		DEE899CB83C91B978D8CB034 /* WorkboardWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WorkboardWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		E2A38D866298D31F8D9E8BEA /* WorkboardAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkboardAppUITests.swift; sourceTree = "<group>"; };
+		E38EB964F346D621975A35F3 /* WorkboardWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkboardWidgets.swift; sourceTree = "<group>"; };
+		F1F8F5F062D84CC40A97715D /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		FC979D41D74066620AAF0F06 /* WorkboardAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WorkboardAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		2D65877A7571FB4C105265E8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				96C90BCDD27F591FF2DB1B46 /* WidgetKit.framework in Frameworks */,
+				AAF4089B7FB2D141137E8FF4 /* SwiftUI.framework in Frameworks */,
+				D2D4622ACE7F91EA1B03DA03 /* AppIntents.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		26139DCD326FF22F2DE3731F = {
+			isa = PBXGroup;
+			children = (
+				556DA6F7B70A461A546CA5BA /* Sources */,
+				8D17A204399C242E54DC9433 /* Tests */,
+				34E4B5503840FD55E9499F6C /* WidgetExtension */,
+				CD48967EFE0EAEF1A0F75A91 /* Frameworks */,
+				35B95A9BD42423A9A4468F25 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		34E4B5503840FD55E9499F6C /* WidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */,
+				E38EB964F346D621975A35F3 /* WorkboardWidgets.swift */,
+			);
+			path = WidgetExtension;
+			sourceTree = "<group>";
+		};
+		35B95A9BD42423A9A4468F25 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3E356B927A706D3E6D6782CD /* WorkboardApp.app */,
+				FC979D41D74066620AAF0F06 /* WorkboardAppUITests.xctest */,
+				DEE899CB83C91B978D8CB034 /* WorkboardWidgets.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		556DA6F7B70A461A546CA5BA /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				7AC7972774A6ADC3765ECE9D /* WorkboardApp */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		7AC7972774A6ADC3765ECE9D /* WorkboardApp */ = {
+			isa = PBXGroup;
+			children = (
+				0171C8F0614A68C02905CF43 /* Appearance.swift */,
+				2CC040A659AF4AAA849F4151 /* AppGroup.swift */,
+				5ED151705C40449FE3BDEA29 /* BoardStore.swift */,
+				CC7DA5092DD6C83E8B7419BA /* BoardView.swift */,
+				421323AFC436573C1D629553 /* Editors.swift */,
+				29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */,
+				A40B26BEED20581CED11E4C4 /* Models.swift */,
+				64EC551A72385D030AC1F5DD /* PluginViews.swift */,
+				5A880F06D49FE999CED11D18 /* QuickCapture.swift */,
+				540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */,
+				5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */,
+				79E28978FF98B9EBFB5A2941 /* WeeklyPlanner.swift */,
+				9B094FB709613DE58EF7BE4A /* WorkboardApp.swift */,
+				C1549B509B53C8C7ED05DDAD /* WorkflowModels.swift */,
+				21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */,
+			);
+			path = WorkboardApp;
+			sourceTree = "<group>";
+		};
+		8D17A204399C242E54DC9433 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				EB10C11A13AA08B059106E4F /* WorkboardAppUITests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		CD48967EFE0EAEF1A0F75A91 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				70F095D74D719F4116AE16CE /* AppIntents.framework */,
+				1264FA2B4DE7D951AD317DE5 /* SwiftUI.framework */,
+				F1F8F5F062D84CC40A97715D /* WidgetKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		EB10C11A13AA08B059106E4F /* WorkboardAppUITests */ = {
+			isa = PBXGroup;
+			children = (
+				E2A38D866298D31F8D9E8BEA /* WorkboardAppUITests.swift */,
+			);
+			path = WorkboardAppUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		51F802ADD10A09BA5918EB6B /* WorkboardAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 63F7F4CC5E005F95A369B990 /* Build configuration list for PBXNativeTarget "WorkboardAppUITests" */;
+			buildPhases = (
+				22791F3C111F0A763E00D09A /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5E5C4D2AFE0EE865E03E103B /* PBXTargetDependency */,
+			);
+			name = WorkboardAppUITests;
+			packageProductDependencies = (
+			);
+			productName = WorkboardAppUITests;
+			productReference = FC979D41D74066620AAF0F06 /* WorkboardAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		52B4601100E85428DE4C17B3 /* WorkboardApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 181EA44F8683B7ED6274D789 /* Build configuration list for PBXNativeTarget "WorkboardApp" */;
+			buildPhases = (
+				32C0C90579C23C5598478A49 /* Sources */,
+				460FDCBC9823F513D9D0C3E7 /* Bundle local service and CLI */,
+				0D9B5F9B23ECC52F663BFE2B /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F0523EE50A3E53B3590A5523 /* PBXTargetDependency */,
+			);
+			name = WorkboardApp;
+			packageProductDependencies = (
+			);
+			productName = WorkboardApp;
+			productReference = 3E356B927A706D3E6D6782CD /* WorkboardApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F1560DFB0D4FCBA3F434DD3A /* WorkboardWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 881DB434342616D725474D45 /* Build configuration list for PBXNativeTarget "WorkboardWidgets" */;
+			buildPhases = (
+				29BA53F2B8791DB483496D1C /* Sources */,
+				2D65877A7571FB4C105265E8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WorkboardWidgets;
+			packageProductDependencies = (
+			);
+			productName = WorkboardWidgets;
+			productReference = DEE899CB83C91B978D8CB034 /* WorkboardWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9C9DC104C9A37AE35EFCC08F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					51F802ADD10A09BA5918EB6B = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 52B4601100E85428DE4C17B3;
+					};
+					52B4601100E85428DE4C17B3 = {
+						ProvisioningStyle = Automatic;
+					};
+					F1560DFB0D4FCBA3F434DD3A = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = A2C255011DB9FB71BF925D49 /* Build configuration list for PBXProject "AgentWorkboard" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 26139DCD326FF22F2DE3731F;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 35B95A9BD42423A9A4468F25 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				52B4601100E85428DE4C17B3 /* WorkboardApp */,
+				51F802ADD10A09BA5918EB6B /* WorkboardAppUITests */,
+				F1560DFB0D4FCBA3F434DD3A /* WorkboardWidgets */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		460FDCBC9823F513D9D0C3E7 /* Bundle local service and CLI */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle local service and CLI";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/../scripts/xcode-bundle-tools.sh\"";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		22791F3C111F0A763E00D09A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CF58411B122946FD7CF0D778 /* WorkboardAppUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		29BA53F2B8791DB483496D1C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FF1CDEB00F26C86571CCF9C4 /* WidgetSnapshot.swift in Sources */,
+				303A5E99B64CCAA663124CFC /* WorkboardWidgets.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		32C0C90579C23C5598478A49 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A2F0327FF1DFD13E2A8FB0C9 /* AppGroup.swift in Sources */,
+				A7FB31512596BC05E93C4FDC /* Appearance.swift in Sources */,
+				65A13717F06569BA783E0CB9 /* BoardStore.swift in Sources */,
+				E3588D43F9AAB74B867DBB4F /* BoardView.swift in Sources */,
+				470BA772C986DFD934F50DFD /* Editors.swift in Sources */,
+				0CDD513B0C90C5E6F57AB4C2 /* GoogleWorkspaceView.swift in Sources */,
+				F075C2F56334018CB932EC4C /* Models.swift in Sources */,
+				B157690AA518A29B9D00D36B /* PluginViews.swift in Sources */,
+				C38163687B4EF789D9F50A69 /* QuickCapture.swift in Sources */,
+				0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */,
+				215B487D4151F345AE689BCF /* Transport.swift in Sources */,
+				E677E684FE762D30BE6499D6 /* WeeklyPlanner.swift in Sources */,
+				6AA77E9E2F9DE7A835861145 /* WorkboardApp.swift in Sources */,
+				C73CEA24632C9857D10D87D3 /* WorkflowModels.swift in Sources */,
+				18805D06D877A57D11F744ED /* WorkflowViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		5E5C4D2AFE0EE865E03E103B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 52B4601100E85428DE4C17B3 /* WorkboardApp */;
+			targetProxy = 460574B364A780DBFE256BBD /* PBXContainerItemProxy */;
+		};
+		F0523EE50A3E53B3590A5523 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F1560DFB0D4FCBA3F434DD3A /* WorkboardWidgets */;
+			targetProxy = 1DF123D44B93F041502EC7FF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2EF580BD70FAFF00726A1B72 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Widget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Resources/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app.widgets;
+				PRODUCT_NAME = WorkboardWidgets;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		386818DAE8588AAF33499A63 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = WorkboardApp;
+			};
+			name = Debug;
+		};
+		7429A098446B5F8FA1094350 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/App.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Resources/App-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app;
+				PRODUCT_NAME = WorkboardApp;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		B95088DE6BDA00D6D1F3B614 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				WORKBOARD_APP_GROUP_IDENTIFIER = group.local.agentworkboard.shared;
+			};
+			name = Release;
+		};
+		BEDEF8A9193178DF7769AAC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app.uitests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = WorkboardApp;
+			};
+			name = Release;
+		};
+		D445821B73EAB5D09EDBE948 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Resources/Widget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Resources/Widget-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app.widgets;
+				PRODUCT_NAME = WorkboardWidgets;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		D54702888CDC717494F7C15B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				WORKBOARD_APP_GROUP_IDENTIFIER = group.local.agentworkboard.shared;
+			};
+			name = Debug;
+		};
+		DFF4F74B3E754B7C504AD471 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/App.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Resources/App-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = local.agentworkboard.app;
+				PRODUCT_NAME = WorkboardApp;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		181EA44F8683B7ED6274D789 /* Build configuration list for PBXNativeTarget "WorkboardApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DFF4F74B3E754B7C504AD471 /* Debug */,
+				7429A098446B5F8FA1094350 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		63F7F4CC5E005F95A369B990 /* Build configuration list for PBXNativeTarget "WorkboardAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				386818DAE8588AAF33499A63 /* Debug */,
+				BEDEF8A9193178DF7769AAC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		881DB434342616D725474D45 /* Build configuration list for PBXNativeTarget "WorkboardWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2EF580BD70FAFF00726A1B72 /* Debug */,
+				D445821B73EAB5D09EDBE948 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A2C255011DB9FB71BF925D49 /* Build configuration list for PBXProject "AgentWorkboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D54702888CDC717494F7C15B /* Debug */,
+				B95088DE6BDA00D6D1F3B614 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9C9DC104C9A37AE35EFCC08F /* Project object */;
+}

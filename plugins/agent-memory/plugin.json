@@ -1,0 +1,23 @@
+{
+  "id": "agent-memory",
+  "name": "agent-memory",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "executable": "plugin.py",
+  "methods": [
+    "check",
+    "search",
+    "read",
+    "attach",
+    "capture"
+  ],
+  "allowed_requests": [
+    "task.attach"
+  ],
+  "description": "Search evidence with the existing amem CLI and attach verified sources to tasks.",
+  "read_only_methods": [
+    "check",
+    "search",
+    "read"
+  ]
+}

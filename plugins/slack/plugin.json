@@ -1,0 +1,13 @@
+{
+  "id": "slack",
+  "name": "Slack",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "executable": "plugin.py",
+  "methods": ["check", "authorize", "disconnect", "messages.search", "messages.read", "messages.thread", "messages.import", "messages.attach", "tasks.send"],
+  "read_only_methods": ["check", "messages.search", "messages.read", "messages.thread"],
+  "task_context_methods": ["tasks.send"],
+  "allowed_requests": ["task.create", "task.attach"],
+  "timeout_seconds": 60,
+  "description": "Attach and import Slack messages as tasks. Enable sending separately to send selected task status to Slack."
+}

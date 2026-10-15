@@ -1,0 +1,75 @@
+name: AgentWorkboard
+options:
+  bundleIdPrefix: local.agentworkboard
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+configs:
+  Debug: debug
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.1.0"
+    CODE_SIGN_STYLE: Automatic
+    WORKBOARD_APP_GROUP_IDENTIFIER: group.local.agentworkboard.shared
+targets:
+  WorkboardApp:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/WorkboardApp
+        includes: ["**/*.swift"]
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/App-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/App.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: local.agentworkboard.app
+        PRODUCT_NAME: WorkboardApp
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+    dependencies:
+      - target: WorkboardWidgets
+        embed: true
+    postCompileScripts:
+      - name: Bundle local service and CLI
+        script: '"${SRCROOT}/../scripts/xcode-bundle-tools.sh"'
+        basedOnDependencyAnalysis: false
+    scheme:
+      testTargets: [WorkboardAppUITests]
+  WorkboardAppUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/WorkboardAppUITests
+        includes: ["**/*.swift"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.agentworkboard.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: WorkboardApp
+    dependencies:
+      - target: WorkboardApp
+  WorkboardWidgets:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: WidgetExtension
+        includes: ["**/*.swift"]
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Widget-Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Widget.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: local.agentworkboard.app.widgets
+        PRODUCT_NAME: WorkboardWidgets
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+      - sdk: AppIntents.framework

@@ -1,0 +1,19 @@
+[package]
+name = "workboard-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "workboard"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+fs2 = "0.4"
+libc = "0.2"
+sha2 = "0.10"
+ctrlc = { version = "3", features = ["termination"] }

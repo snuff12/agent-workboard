@@ -1,0 +1,22 @@
+# Agent Workboard contributor rules
+
+- This project is in early implementation and verification. Describe implemented behavior and verification evidence accurately. Verify actual desktop widgets and Google account integration with their own execution evidence.
+- Write all project documentation, source comments, user interface text, CLI help, diagnostics, examples, fixtures, and commit messages in English. Keep this repository English-only. Run `python3 scripts/check-english.py` before committing. User-provided task data may use any language; do not restrict input to English.
+- Git history starts from an English initial commit. Do not merge legacy-history branches or push old refs back to the remote. Reapply any needed historical edits onto the current main branch.
+- The product requires CLI integration, a native macOS widget, a desktop kanban board, and subtasks. Additional integrations, including agent-memory and Google Workspace, are separately installed plugins. All core features must work without plugins. Read README.md and docs/product-requirements.md first.
+- The initial stack uses a Rust task core and CLI, a SwiftUI Mac app, and a WidgetKit widget. Follow docs/technology-stack.md and docs/design-decisions.md for technical decisions.
+- Obsidian is optional. Neither the app nor CLI requires Obsidian or an Obsidian plugin.
+- Store task state in the board's persistent SQLite database. Widget JSON is derived data. Never put the task database in amem's rebuildable `.state` directory.
+- The service owns database writes. The CLI and app use the same request contract. Validate assignment, revisions, and retry request IDs within transactions.
+- Distinguish task completion from the end of an agent response turn. Represent tasks, runs, artifacts, and next actions separately.
+- Do not include integration code or dedicated dependencies in the core distribution. Install plugins separately and keep them disabled by default. Uninstalled or disabled plugins must not load or run code, discover or invoke executables, access accounts, or synchronize. Core installation, builds, and runtime require no Python, amem, or Google account.
+- Plugins modify tasks through the same service request contract. They must not write the task database directly. Disabling or removing a plugin preserves tasks, subtasks, artifacts, and existing evidence links.
+- Each subtask has its own status, assignee, completion criteria, and artifacts. Completing subtasks does not automatically complete the parent.
+- Keep the default UI simple. Persist each user's theme, accent, text size, density, and display preferences. Support theme import and export.
+- Google Workspace centers on Calendar deadlines and meetings, with optional Gmail. Verify dates, time zones, source versions, deduplication, and conflict handling.
+- Existing agent-memory data and external project sources are not owned by this project. Use the user-configured amem CLI path. Installation paths such as `~/.local/bin/amem` are examples; do not hardcode a specific user's path in the product.
+- Missing executables, failures, and timeouts in optional integrations must not block core workflows. Disconnecting preserves tasks, artifacts, and evidence links. Core doctor checks must not fail because an optional integration is disabled or unavailable.
+- Even when enabled, amem search snippets are discovery hints. Read selected sources, verify the evidence, and link original paths and locations. Apply identical project and domain scopes to search and read.
+- Never automatically save conversations or search results as long-term memory. Send only decisions or procedures the user explicitly asks to preserve to `amem capture` as inbox candidates.
+- Do not rewrite the existing Python amem implementation as part of this board. Porting requires separate criteria and compatibility checks.
+- Use clear, plain English in project materials. Label command examples as proposals until implemented. In conversation, follow the user's chosen language.
