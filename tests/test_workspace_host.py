@@ -54,6 +54,8 @@ def fake_api(service,path,token,params=None,method="GET",body=None,etag=None):
     if service!="calendar":
         raise AssertionError("Only Calendar access is allowed in this test")
     parts=path.split("/")
+    if method=="GET" and parts[:3]==["users","me","calendarList"] and len(parts)==4:
+        return {"timeZone":state.get("calendar_zone","America/Los_Angeles")}
     if len(parts)<3 or parts[0]!="calendars" or parts[2]!="events":
         raise AssertionError("Unexpected Calendar path: "+path)
     calendar=urllib.parse.unquote(parts[1])
@@ -229,7 +231,19 @@ class WorkspaceHost(unittest.TestCase):
         self.assertEqual(detail["task"]["scheduled_start"], "2026-10-16")
         self.assertEqual(detail["task"]["scheduled_end"], "2026-10-18")
         self.assertEqual(detail["task"]["due_at"], "2026-10-17")
+        self.assertEqual(detail["task"]["time_zone"], "America/Los_Angeles")
         self.assertEqual(detail["artifacts"][0]["metadata"]["end"], "2026-10-18")
+        self.assertEqual(self.calendar()["writes"], 0)
+
+    def test_missing_calendar_zone_leaves_board_unchanged(self):
+        state = self.calendar()
+        state["events"]["primary|event1"] = event(start={"date": "2026-10-16"}, end={"date": "2026-10-18"})
+        state["calendar_zone"] = "Invalid/Zone"
+        self.save_fixture(state)
+        before = self.rpc("task.list")["result"]
+        self.plugin("events.import", {"event_id": "event1", "project_id": self.project}, ok=False)
+        self.assertEqual(self.rpc("task.list")["result"], before)
+        self.assertEqual(self.calendar()["writes"], 0)
 
     def test_create_injects_latest_task_from_service_and_retries_one_external_write(self):
         task = self.task("Initial title")

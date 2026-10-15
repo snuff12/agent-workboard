@@ -201,14 +201,14 @@ def event_path(calendar_id, event_id=None):
     return "calendars/" + quoted(calendar_id) + "/events" + ("/" + quoted(event_id) if event_id else "")
 
 
-def event_info(event, calendar_id):
+def event_info(event, calendar_id, calendar_zone=None):
     start, end = event.get("start", {}), event.get("end", {})
     return {"id": event["id"], "calendar_id": calendar_id,
         "title": event.get("summary", "Untitled event"), "summary": event.get("summary", "Untitled event"),
         "description": event.get("description", ""), "detail": event.get("description", ""),
         "url": event.get("htmlLink") or "https://calendar.google.com/calendar/u/0/r",
         "etag": event.get("etag"), "start": start.get("dateTime", start.get("date")),
-        "end": end.get("dateTime", end.get("date")), "time_zone": start.get("timeZone"),
+        "end": end.get("dateTime", end.get("date")), "time_zone": start.get("timeZone") or calendar_zone,
         "status": event.get("status", "confirmed"), "location": event.get("location", "")}
 
 
@@ -272,13 +272,27 @@ def stable_event_id(account, calendar_id, task_id):
     return encoded.translate(str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567", "0123456789ABCDEFGHIJKLMNOPQRSTUV")).lower().rstrip("=")
 
 
-def schedule_from_event(item, fallback_zone="UTC"):
+def schedule_from_event(item):
     start, end = parse_time(item["start"]), parse_time(item["end"])
     if type(start) is not type(end) or end <= start:
         raise IntegrationError("The event to import has an invalid start or end.", "INVALID_REQUEST")
     return {"scheduled_start": item["start"], "scheduled_end": item["end"],
         "due_at": (end - dt.timedelta(days=1)).isoformat() if type(end) is dt.date else item["end"],
-        "time_zone": item["time_zone"] or fallback_zone or "UTC"}
+        "time_zone": item["time_zone"]}
+
+
+def resolve_event_zone(item, token):
+    if item["time_zone"] or item["status"] == "cancelled" or not item["start"] or not item["end"]:
+        return
+    # Date-only events omit start.timeZone. Use their calendar's zone, not UTC
+    # or the previously linked task's zone. The existing calendar-list scope suffices.
+    calendar = api("calendar", "users/me/calendarList/" + quoted(item["calendar_id"]), token)
+    zone = calendar.get("timeZone")
+    try:
+        ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise IntegrationError("The calendar did not provide a valid IANA time zone.") from None
+    item["time_zone"] = zone
 
 
 def calendar_run(method, params, token, account):
@@ -304,12 +318,13 @@ def calendar_run(method, params, token, account):
         page = api("calendar", path, token, {"timeMin": minimum, "timeMax": maximum,
             "singleEvents": "true", "orderBy": "startTime", "showDeleted": "false",
             "maxResults": min(100, max(1, int(params.get("limit", 30)))), "pageToken": params.get("page_token")})
-        return {"ok": True, "result": {"events": [event_info(item, calendar_id) for item in page.get("items", [])],
+        return {"ok": True, "result": {"events": [event_info(item, calendar_id, page.get("timeZone")) for item in page.get("items", [])],
             "next_page_token": page.get("nextPageToken"), "time_zone": page.get("timeZone")}}
     if method in ("events.get", "events.import", "events.pull"):
         event = api("calendar", event_path(calendar_id, required(params, "event_id")), token)
         item = event_info(event, calendar_id)
         if method == "events.get":
+            resolve_event_zone(item, token)
             return {"ok": True, "result": item}
         if item["status"] == "cancelled":
             raise IntegrationError("Cancelled events cannot be imported as tasks.", "INVALID_REQUEST")
@@ -319,12 +334,16 @@ def calendar_run(method, params, token, account):
             task = params.get("task")
             if not isinstance(task, dict) or type(task.get("revision")) is not int:
                 raise IntegrationError("Specify the task ID and revision for attachment.", "INVALID_REQUEST")
+        schedule = schedule_from_event(item)
+        resolve_event_zone(item, token)
+        schedule["time_zone"] = item["time_zone"]
+        if method == "events.pull":
             update = {"task_id": required(task, "id"), "expected_revision": task["revision"],
-                      **schedule_from_event(item, task.get("time_zone", "UTC"))}
+                      **schedule}
             return {"ok": True, "result": item, "requests": [{"method": "task.update", "params": update},
                 event_attachment(item, task["id"], {"$result": "/0/task/revision"})]}
         creation = {"project_id": required(params, "project_id"), "title": params.get("title") or item["title"],
-            "goal": item["description"], **schedule_from_event(item)}
+            "goal": item["description"], **schedule}
         if params.get("parent_id"):
             creation["parent_id"] = params["parent_id"]
         return {"ok": True, "result": item, "requests": [{"method": "task.create", "params": creation},
