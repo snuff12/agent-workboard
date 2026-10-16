@@ -45,8 +45,8 @@ Numbers follow [product requirements](product-requirements.md). Implementation a
 
 | Criterion | Result | Evidence and remaining scope |
 | --- | --- | --- |
-| amem 1: configured CLI search/evidence | Verified | One real search/read/attachment; scope/provenance regressions use a fake executable. |
-| amem 2: explicit selected capture | Partial | Consent, kind, private inbox, deduplication, and uncertain outcomes checked; no real capture. |
+| amem 1: configured CLI search/evidence | Verified | One real search/read/attachment; scope/provenance regressions use a fake executable. `verify` and replacement attachment checked against the installed engine in a disposable home. |
+| amem 2: explicit selected capture | Partial | Consent, kind, private inbox, deduplication, and uncertain outcomes checked. One scoped capture verified with the installed engine in a disposable home; capture into the user's inbox and its review flow not run. |
 | amem 3: no disabled execution/search | Verified | Host pre-execution guards, markers, and absent-plugin distribution checks. |
 | amem 4: failures isolated from core | Partial | CLI/service missing/error/timeout cases checked; actual widget under those failures pending. |
 | amem 5: preserve links after disconnect | Verified | Keep external sources external, retaining path/location/hash in task data; removal does not change the database. |
