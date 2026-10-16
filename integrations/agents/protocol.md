@@ -8,7 +8,16 @@ The board is the shared record of work for people and agents on this Mac. Use th
 - Work on a board task only when the user's request clearly matches it or the user asks you to. Then claim and start it, and keep the returned run ID:
   `workboard task claim <task-id>` and `workboard task start <task-id> --json`.
 - Do not take over a task that another agent holds. Tell the user instead.
-- Do not create, claim, or change tasks for ordinary requests that do not match board work. When you find follow-up work outside the current request, capture it for the user to sort: `workboard inbox capture --title "<follow-up>" --note "<context>"`.
+- Except for work from a source message (below), do not create, claim, or change tasks for ordinary requests that do not match board work. When you find follow-up work outside the current request, capture it for the user to sort: `workboard inbox capture --title "<follow-up>" --note "<context>"`.
+
+## Work from a Slack message or another source
+
+When the user asks for work based on a Slack message, email, issue, or document, keep its link on the board so the user and the next agent can find the source. The Slack plugin is not needed.
+
+- Record the permalink, such as `https://<workspace>.slack.com/archives/<channel>/p<timestamp>`, with a one-line summary. Do not copy the message body into the board.
+- If a board task matches the work, attach the link: `workboard task attach <task-id> --source <permalink> --kind url --description "Slack: <one-line summary>"`.
+- If no task matches and the board context shows a project for this directory, create the task, attach the link, then claim and start it: `workboard task add --project <project-id> --title "<work>" --goal "<what the message asks>" --next-action "<first step>" --json`.
+- If no project matches, capture it for the user to sort: `workboard inbox capture --title "<work>" --source <permalink> --note "<one-line summary>"`. Promoting the item to a task attaches the link.
 
 ## While working
 

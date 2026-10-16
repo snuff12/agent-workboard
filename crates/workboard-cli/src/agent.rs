@@ -205,9 +205,15 @@ pub fn context(
             cwd.display()
         ));
     } else {
-        let names: Vec<&str> = projects
+        let names: Vec<String> = projects
             .iter()
-            .map(|p| p["name"].as_str().unwrap_or("?"))
+            .map(|p| {
+                format!(
+                    "{} (id {})",
+                    p["name"].as_str().unwrap_or("?"),
+                    p["id"].as_str().unwrap_or("?")
+                )
+            })
             .collect();
         out.push(format!("Project: {}.", names.join(", ")));
     }
@@ -253,14 +259,14 @@ pub fn context(
             5,
         );
     }
-    if let Ok(inbox) = call("inbox.list", json!({"status":"open"})) {
+    if let Ok(inbox) = call("inbox.list", json!({"status":"pending"})) {
         let open = inbox["items"].as_array().map(Vec::len).unwrap_or(0);
         if open > 0 {
             out.push(format!("Inbox: {open} open item(s) for the user to sort."));
         }
     }
     out.push(
-        "Claim a task only when the user's request clearly matches it. Request review instead of completing. Run `workboard agent brief` for the full protocol."
+        "Claim a task only when the user's request clearly matches it. When work comes from a Slack message or another source, record its link on the board. Request review instead of completing. Run `workboard agent brief` for the full protocol."
             .to_string(),
     );
     Ok(out.join("\n"))

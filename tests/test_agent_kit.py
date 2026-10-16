@@ -125,8 +125,26 @@ class AgentSessions(unittest.TestCase):
         self.assertIn("claude:aaaa1111", json.dumps(item), "inbox items record which agent captured them")
         context = self.cli("agent", "context", agent="codex:cccc3333", cwd=self.worktree / "src")
         self.assertEqual(context["agent"], "codex:cccc3333")
-        self.assertIn("Project: App.", context["context"], "a worktree maps to its repository's project")
+        self.assertIn(f"Project: App (id {project}).", context["context"],
+                      "a worktree maps to its repository's project, with the ID needed to create tasks")
         self.assertIn(task["id"], context["context"], "context carries full task IDs that commands accept")
+        self.assertIn("Inbox: 1 open item(s)", context["context"])
+
+    def test_source_link_paths_in_the_protocol_work(self):
+        link = "https://example.slack.com/archives/C0123/p1700000000000100"
+        project = self.cli("project", "add", "--name", "App", "--directory", self.main)["project_id"]
+        task = self.cli("task", "add", "--project", project, "--title", "Fix the export bug",
+                        "--goal", "Exports fail for a customer", "--next-action", "Reproduce")["task"]
+        self.cli("task", "attach", task["id"], "--source", link, "--kind", "url",
+                 "--description", "Slack: export failure report", agent="codex:cccc3333")
+        artifacts = self.cli("task", "show", task["id"])["artifacts"]
+        self.assertEqual([(a["path"], a["kind"]) for a in artifacts], [(link, "url")])
+        item = self.cli("inbox", "capture", "--title", "Check the report", "--source", link,
+                        "--note", "Export failure report", agent="codex:cccc3333")["item"]
+        promoted = self.cli("inbox", "promote", item["id"], "--project", project,
+                            "--expected-revision", item["revision"])
+        sources = [a["path"] for a in self.cli("task", "show", promoted["task"]["id"])["artifacts"]]
+        self.assertEqual(sources, [link], "promoting an inbox item keeps the source link")
 
     def test_hooks_add_context_set_identity_and_fail_open(self):
         project = self.cli("project", "add", "--name", "App", "--directory", self.main)["project_id"]

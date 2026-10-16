@@ -11,6 +11,8 @@ Claude Code and Codex sessions can use the board without the user repeating inst
 | Act on work | The agent claims, starts, updates, attaches, pauses, and requests review with the CLI when the user's request matches a board task. Other follow-ups go to the inbox. | Yes, through the service |
 | Decide | The user approves, requests changes, or rejects reviews in the app. The widget shows reviews that wait. | Yes, by the user |
 
+When the user asks for work based on a Slack message or another source, the agent records the link on the board: it attaches the link to the matching task, creates a task in the directory's project when none matches, or captures an inbox item with the link when no project matches. The message body stays in Slack. This needs no Slack plugin or token.
+
 Hooks never change task state. A response ending is not task completion, so no hook completes, reviews, or pauses work.
 
 ## Agent identity

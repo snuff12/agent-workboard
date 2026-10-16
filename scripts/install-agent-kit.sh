@@ -35,11 +35,11 @@ claude_install() {
     else
         claude plugin marketplace add "$KIT" >/dev/null
     fi
+    # Claude Code caches the plugin by version; reinstall so the cache matches this checkout.
     if claude plugin list --json 2>/dev/null | grep -q "\"${PLUGIN}@${MARKETPLACE}\""; then
-        claude plugin update "${PLUGIN}@${MARKETPLACE}" >/dev/null
-    else
-        claude plugin install "${PLUGIN}@${MARKETPLACE}" >/dev/null
+        claude plugin uninstall "${PLUGIN}@${MARKETPLACE}" >/dev/null
     fi
+    claude plugin install "${PLUGIN}@${MARKETPLACE}" >/dev/null
     echo "Claude Code: installed ${PLUGIN}@${MARKETPLACE}. New sessions load board context at start."
 }
 
