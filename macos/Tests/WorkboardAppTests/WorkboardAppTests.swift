@@ -211,6 +211,11 @@ import Darwin
                 var unsafe = PluginConfigurationDraft(config: .object(["credentials_file": .string("/keys/key.json")])); unsafe.account = label
                 try require((try? unsafe.enableParameters(for: pluginID)) == nil, "\(pluginID) saved a Keychain account label that `security -i` cannot store safely: \(label)")
             }
+            var earlier = PluginConfigurationDraft(config: .object(["credentials_file": .string("/keys/key.json"), "account": .string("two words")]))
+            let kept = try earlier.enableParameters(for: pluginID)
+            try require(kept["config"]?["account"].string == "two words", "\(pluginID) refused to save other settings with a label saved before labels were checked")
+            earlier.account = "O'Brien"
+            try require((try? earlier.enableParameters(for: pluginID)) == nil, "\(pluginID) accepted a changed label that `security -i` cannot store safely")
             var safe = PluginConfigurationDraft(config: .object(["credentials_file": .string("/keys/key.json")])); safe.account = "work-mail@example.com"
             let saved = try safe.enableParameters(for: pluginID)
             try require(saved["config"]?["account"].string == "work-mail@example.com", "\(pluginID) refused a valid account label")

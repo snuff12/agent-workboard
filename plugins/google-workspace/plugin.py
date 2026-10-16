@@ -64,14 +64,17 @@ ACCOUNT = r"[A-Za-z0-9._@-]{1,80}"
 
 def account_label(value):
     if not isinstance(value, str) or not re.fullmatch(ACCOUNT, value):
-        raise IntegrationError("The account label must be 1 to 80 ASCII letters, digits, periods, underscores, "
-                               "at signs, or hyphens.", "INVALID_REQUEST")
+        raise IntegrationError("Connecting stores the key under the account label, which must be 1 to 80 ASCII letters, "
+                               "digits, periods, underscores, at signs, or hyphens. Disconnect, change the label, and "
+                               "connect again.", "INVALID_REQUEST")
     return value
 
 
 def keychain(account, token=None, remove=False):
-    account_label(account)
     if token is not None:
+        # Only storing passes the label inside a `security -i` command line. Reading and removal pass it as
+        # its own argument, so a connection made with an earlier label can still be read and disconnected.
+        account_label(account)
         # Send token material over stdin, never process arguments or stdout.
         line = "add-generic-password -U -s %s -a %s -w %s\n" % tuple(
             shlex.quote(v) for v in (SERVICE, account, json.dumps(token)))
@@ -486,12 +489,12 @@ def run(request):
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
     if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("config and params must be JSON objects.", "INVALID_REQUEST")
-    account = account_label(str(config.get("account", "default")))
+    account = str(config.get("account", "default"))
     if method == "disconnect":
         keychain(account, remove=True)
         return {"ok": True, "result": {"connected": False}}
     if method == "authorize":
-        return {"ok": True, "result": authorize(config, account)}
+        return {"ok": True, "result": authorize(config, account_label(account))}
     if method not in METHODS and method != "check":
         raise IntegrationError("Unsupported feature.", "INVALID_REQUEST")
     scopes(config)

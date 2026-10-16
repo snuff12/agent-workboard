@@ -42,7 +42,7 @@ workboard plugin run slack authorize
 workboard plugin check slack
 ```
 
-The account label names the Keychain item. Use 1 to 80 ASCII letters, digits, periods, underscores, at signs, or hyphens; the plugin and the app refuse other labels before touching Keychain.
+The account label names the Keychain item. Connecting needs 1 to 80 ASCII letters, digits, periods, underscores, at signs, or hyphens; the plugin and the app refuse other labels before storing a key. A connection made earlier with another label can still be read and disconnected, and the app saves other settings with it unchanged.
 
 Build `dist/AgentWorkboard-plugin-slack-0.1.0.zip` with `scripts/package-plugins.sh`. Extract and select `slack-0.1.0` in the app/CLI, not the ZIP itself.
 
