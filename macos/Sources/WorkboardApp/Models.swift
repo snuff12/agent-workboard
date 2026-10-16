@@ -159,6 +159,12 @@ struct TaskArtifact: Identifiable, Sendable {
         provider = json["provider"].string ?? json["metadata"]["provider"].string; locator = json["locator"].string ?? json["metadata"]["locator"].string
         metadata = .object(json["metadata"].object)
     }
+    var isOrcaWorktree: Bool { provider == "orca" && kind == "workspace" && !(locator ?? "").isEmpty }
+    /// One entry per linked Orca worktree, newest link first. Agent launches add links to the same worktree.
+    static func orcaWorktrees(_ artifacts: [TaskArtifact]) -> [TaskArtifact] {
+        var seen = Set<String>()
+        return artifacts.reversed().filter { $0.isOrcaWorktree && seen.insert($0.locator ?? "").inserted }
+    }
     var url: URL? { if let url = URL(string: path), ["http", "https", "file", "mailto"].contains(url.scheme ?? "") { return url }; return path.hasPrefix("/") ? URL(fileURLWithPath: path) : nil }
 }
 

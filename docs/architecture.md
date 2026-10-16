@@ -22,6 +22,8 @@ flowchart TB
     K --> N[Gmail]
     H --> S[Slack plugin]
     S --> T[Slack Web API]
+    H --> R[Linear plugin]
+    R --> U[Linear GraphQL API]
     H --> O[Orca plugin]
     O --> P[Local Orca CLI]
     H --> Q[GitHub plugin]
@@ -60,6 +62,8 @@ Due dates and schedules remain core task data. Personal planning works without G
 agent-memory invokes amem only after installation, enabling, and an explicit request. See [agent-memory](agent-memory-integration.md) for scoped searches, source verification, and explicit memory capture.
 
 Slack separates search results from source reads and rechecks source versions immediately before attachment/import. Status sending is enabled separately and uses the latest task read by the host from the service. The shared journal reuses completed sends and prevents automatic resending after uncertain outcomes. See [Slack](slack.md).
+
+Linear follows the same read, recheck, and attach pattern for issues. Status comments and state changes are enabled separately and use the latest task read by the host. Comments use an ID derived from the issue and task revision, so a new request cannot post the same status twice. State changes require the version from the last read and refuse issues that changed since. See [Linear](linear.md).
 
 Orca queries the configured local repository's worktrees and terminals through its CLI. Record assignment and a run first; launch with host-verified current task/run data. Per-run external journals prevent duplicate terminals and refuse uncertain relaunches. Link created terminals to board runs. Saved attachment requests and plugin-scoped `idempotency_key` values recover the attachment once after host interruption. Terminal exit does not complete the task. See [Orca](orca-integration.md).
 

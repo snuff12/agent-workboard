@@ -48,6 +48,7 @@ struct TaskDetailView: View {
                         TaskWorkflowSections(task: detail.task, decisions: detail.reviewDecisions).id(store.workflowGeneration)
                         if !detail.task.completionSummary.isEmpty { DetailSection(title: "Outcome", symbol: "checkmark.circle") { detailText(detail.task.completionSummary, empty: "") } }
                         children(detail)
+                        if store.orcaPlugin != nil || detail.artifacts.contains(where: \.isOrcaWorktree) { orcaWorktrees(detail) }
                         artifacts(detail)
                         runs(detail)
                         history(detail)
@@ -124,12 +125,36 @@ struct TaskDetailView: View {
             }
         }
     }
-    private func artifacts(_ detail: TaskDetail) -> some View {
-        DetailSection(title: "Artifacts and links", symbol: "paperclip", count: detail.artifacts.isEmpty ? nil : "\(detail.artifacts.count)", action: { showingAttachment = true }) {
-            if detail.artifacts.isEmpty { Text("Attach a file or URL so the next run can find it.").font(.caption).foregroundStyle(BoardInk.tertiary(colorScheme)) }
+    private func orcaWorktrees(_ detail: TaskDetail) -> some View {
+        let linked = TaskArtifact.orcaWorktrees(detail.artifacts)
+        return DetailSection(title: "Orca worktree", symbol: "arrow.triangle.branch", count: linked.count > 1 ? "\(linked.count)" : nil, action: store.orcaPlugin == nil ? nil : { store.worktreeLinkTask = detail.task }) {
+            if linked.isEmpty { Text("Link the Orca worktree where this task is worked on.").font(.caption).foregroundStyle(BoardInk.tertiary(colorScheme)) }
             else {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(detail.artifacts) { artifact in
+                    ForEach(linked) { artifact in
+                        HStack(alignment: .top, spacing: 9) {
+                            Image(systemName: "arrow.triangle.branch").font(.system(size: 13)).foregroundStyle(appearance.accent).padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(artifact.metadata["title"].string ?? (artifact.path as NSString).lastPathComponent).font(.system(size: 12)).lineLimit(2)
+                                Text(OrcaPaths.summary(repository: artifact.metadata["repo_name"].string, branch: artifact.metadata["branch"].string)).font(.system(size: 10)).foregroundStyle(BoardInk.secondary(colorScheme)).lineLimit(1)
+                                Text(artifact.path).font(.system(size: 10)).foregroundStyle(BoardInk.tertiary(colorScheme)).lineLimit(2).textSelection(.enabled)
+                            }
+                            Spacer(minLength: 0)
+                            Button { NSWorkspace.shared.open(URL(fileURLWithPath: artifact.path)) } label: { Image(systemName: "folder").font(.system(size: 11)) }.buttonStyle(.plain).foregroundStyle(BoardInk.secondary(colorScheme)).help("Open in Finder").disabled(!artifact.path.hasPrefix("/"))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private func artifacts(_ detail: TaskDetail) -> some View {
+        // Orca worktree links have their own section.
+        let others = detail.artifacts.filter { !$0.isOrcaWorktree }
+        return DetailSection(title: "Artifacts and links", symbol: "paperclip", count: others.isEmpty ? nil : "\(others.count)", action: { showingAttachment = true }) {
+            if others.isEmpty { Text("Attach a file or URL so the next run can find it.").font(.caption).foregroundStyle(BoardInk.tertiary(colorScheme)) }
+            else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(others) { artifact in
                         HStack(alignment: .top, spacing: 9) {
                             Image(systemName: artifact.kind == "url" ? "link" : "doc").font(.system(size: 13)).foregroundStyle(appearance.accent).padding(.top, 2)
                             VStack(alignment: .leading, spacing: 4) {

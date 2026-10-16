@@ -1,0 +1,13 @@
+{
+  "id": "linear",
+  "name": "Linear",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "executable": "plugin.py",
+  "methods": ["check", "authorize", "disconnect", "teams.list", "issues.search", "issues.read", "issues.import", "issues.attach", "issues.comment", "issues.update_state"],
+  "read_only_methods": ["check", "teams.list", "issues.search", "issues.read"],
+  "task_context_methods": ["issues.comment", "issues.update_state"],
+  "allowed_requests": ["task.create", "task.attach"],
+  "timeout_seconds": 60,
+  "description": "Attach and import Linear issues as tasks. Enable status comments and issue state changes separately."
+}

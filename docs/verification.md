@@ -105,6 +105,21 @@ Added search/source/thread reading, task/subtask attachment/import, selected sta
 
 Actual workspace permissions/search/read/sending and Slack Keychain items remain unverified. Swift build/request checks are not native interaction proof. See [Slack](slack.md).
 
+## Linear verification
+
+Added issue search/reading, task/subtask attachment/import, selected status comments, selected issue state changes, and dedicated settings/use screens on October 16, 2026 without accessing a real account or installing in the user's board.
+
+| Check | Result |
+| --- | --- |
+| Provider | 32 checks in `test_linear_plugin.py`: explicit flags, personal API key/workspace, no key leakage, Keychain values without names, fixed GraphQL documents with variables, search filters/cursors, identifier lookups with full-text fallback, link verification, source conflicts, priority/due-date imports, error/rate-limit mapping, escaped comment content with blocking, comment deduplication, and state-change guards. HTTP/Keychain mocked. |
+| Host | Six actual CLI/provider/service/DB checks: subtasks, retries, removal preservation, source edits, latest context, forged-body replacement, revisions, uncertain comments recovered without a second comment, no identity request before writes, and state changes recorded as evidence. Only HTTP/Keychain mocked. |
+| Real API | One unauthenticated request with an invalid key confirmed the rejection shape: HTTP 401 with `AUTHENTICATION_ERROR`. No workspace data was read. |
+| Regressions | Rust 74 (core 58, CLI 12, service 4) and Python 191 passed. Linear contributed 38 Python checks. |
+| Swift | `swift build` and the app test runner against the actual CLI passed, including Linear configuration/Boolean flags, issue identity, source versions, links, write parameters, and state suggestions. |
+| ZIPs | Five packages contained only manifest/executable, installed disabled, and started no provider/service. |
+
+Actual workspace authentication, key permissions, search/read, comments, state changes, and Linear Keychain items remain unverified. Swift build/model checks are not native interaction proof; no Swift→CLI test drives the Linear screen. See [Linear](linear.md).
+
 ## GitHub verification
 
 Added issue and pull request listing, scoped search, exact reads, task/subtask import and attachment, linked status, and separately enabled status comments and issue creation on October 16, 2026. The plugin was not installed in the user's board.
@@ -199,6 +214,7 @@ The cause was not established. Two changes were made:
 | Google accounts | No Desktop OAuth client provided; mocked APIs/local callback only. | Actual consent/refresh, Calendar create/update/import, optional Gmail. |
 | Native app | Seven baseline XCUITests on the second Mac. | New planning/plugin screens and shortcuts, menu bar, restore picker/confirmation; widget links were manually verified but not automated. |
 | Slack accounts | Mocked provider/host and Swift checks. | Actual token/workspace permissions, search/read/sending, Keychain. |
+| Linear accounts | Mocked provider/host and Swift model checks; invalid-key error shape from the real API. | Actual API key/workspace permissions, search/read, comments, state changes, Keychain. |
 | GitHub writes | Mocked provider/host and Swift checks; live gh-mode reads on a public repository. | Actual status comment and issue creation, token-mode Keychain, fine-grained token permissions, native GitHub screens. |
 | Orca agents | Isolated actual runtime and harmless terminal launch. | Actual agent authentication/model calls and native launch controls. |
 | External distribution | Local ad-hoc installation/DMG; personal-team widget proof. No Developer ID on the second Mac. | Developer ID/hardened runtime/notarization and target-Mac installation. |

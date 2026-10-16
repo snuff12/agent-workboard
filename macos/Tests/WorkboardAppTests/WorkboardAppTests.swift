@@ -17,7 +17,9 @@ import Darwin
         try themeFilesAndFreshProcess()
         try connectionIdentities()
         try pluginConfigurationValues()
+        try orcaWorktreeLinks()
         try slackContract()
+        try linearContract()
         try githubConfiguration()
         try githubItemContract()
         try githubArtifactLinks()
@@ -163,6 +165,24 @@ import Darwin
         try require(base != configuration.identity(environment: ["WORKBOARD_BIN": "/tmp/bin-a", "WORKBOARD_DATA_DIR": "/tmp/data-b", "WORKBOARD_SOCKET": "/tmp/socket-a"]), "Data directory change did not invalidate connection identity")
         try require(base != configuration.identity(environment: ["WORKBOARD_BIN": "/tmp/bin-a", "WORKBOARD_DATA_DIR": "/tmp/data-a", "WORKBOARD_SOCKET": "/tmp/socket-b"]), "Socket change did not invalidate connection identity")
     }
+    static func orcaWorktreeLinks() throws {
+        func link(_ id: String, locator: String, provider: String = "orca", kind: String = "workspace", title: String) -> JSONValue {
+            .object(["id": .string(id), "path": .string("/w/" + title), "kind": .string(kind), "provider": .string(provider), "locator": .string(locator), "metadata": .object(["title": .string(title)])])
+        }
+        let artifacts = [link("1", locator: "repo::/w/a", title: "first link"), link("2", locator: "repo::/w/b", title: "other"),
+                         link("3", locator: "repo::/w/a", title: "run link"), link("4", locator: "", title: "no locator"),
+                         link("5", locator: "x", provider: "agent-memory", title: "memory"), link("6", locator: "y", kind: "url", title: "url")]
+            .enumerated().map { TaskArtifact($0.element, index: $0.offset) }
+        try require(TaskArtifact.orcaWorktrees(artifacts).map(\.id) == ["3", "2"], "Linked Orca worktrees were not one per worktree with the newest link first")
+        let repos: [JSONValue] = [.object(["id": .string("app"), "path": .string("/code/app")]), .object(["id": .string("lib"), "path": .string("/code/lib")]),
+                                  .object(["id": .string("tools"), "path": .string("/code/app-tools")])]
+        try require(OrcaPaths.repositories(repos, for: "/code/app") == ["app"], "A project folder did not match its own repository only")
+        try require(OrcaPaths.repositories(repos, for: "/code/app/services/api") == ["app"], "A project folder inside a repository did not match it")
+        try require(OrcaPaths.repositories(repos, for: "/code") == ["app", "lib", "tools"], "A parent project folder did not match the repositories inside it")
+        try require(OrcaPaths.repositories(repos, for: "").isEmpty && OrcaPaths.repositories(repos, for: "/elsewhere").isEmpty, "An unrelated or empty folder matched a repository")
+        try require(OrcaPaths.summary(repository: "app", branch: "refs/heads/feature/x", status: "") == "app · feature/x", "Worktree summary was not shortened")
+        print("✓ Orca worktree links: one entry per worktree, project folder matching, and summaries verified")
+    }
     static func pluginConfigurationValues() throws {
         let saved: JSONValue = .object(["calendar_enabled": .bool(false), "gmail_enabled": .bool(true), "account": .string("work-mail"), "credentials_file": .string("/custom/oauth.json"), "future_option": .object(["keep": .bool(true)])])
         var draft = PluginConfigurationDraft(config: saved)
@@ -195,6 +215,16 @@ import Darwin
         try require(slackEdited["send_enabled"].bool == true && slackEdited["future_option"] == slackSaved["future_option"], "Slack edit lost settings or failed to enable sending")
         let invalidSlack = PluginConfigurationDraft(config: .object(["messages_enabled": .string("true"), "send_enabled": .number(1)]))
         try require(!invalidSlack.slackMessagesEnabled && !invalidSlack.slackSendEnabled, "Non-Boolean Slack flags enabled access")
+        let linearSaved: JSONValue = .object(["account": .string("work-linear"), "workspace": .string("acme"), "credentials_file": .string("/custom/linear.credentials.json"), "issues_enabled": .bool(true), "comments_enabled": .bool(false), "state_changes_enabled": .bool(false), "future_option": .string("keep")])
+        var linearDraft = PluginConfigurationDraft(config: linearSaved)
+        try require(linearDraft.linearIssuesEnabled && !linearDraft.linearCommentsEnabled && !linearDraft.linearStateChangesEnabled && linearDraft.linearWorkspace == "acme", "Linear writes were enabled without an explicit setting")
+        let linearUnchanged = try linearDraft.enableParameters(for: "linear")["config"]
+        try require(linearUnchanged == linearSaved, "Linear configuration did not round-trip")
+        linearDraft.linearStateChangesEnabled = true; linearDraft.linearWorkspace = "  acme \n"
+        let linearEdited = try linearDraft.enableParameters(for: "linear")["config"]!
+        try require(linearEdited["state_changes_enabled"].bool == true && linearEdited["comments_enabled"].bool == false && linearEdited["workspace"].string == "acme" && linearEdited["future_option"] == linearSaved["future_option"], "Linear edit lost settings or changed the wrong write permission")
+        let invalidLinear = PluginConfigurationDraft(config: .object(["issues_enabled": .string("true"), "comments_enabled": .number(1), "state_changes_enabled": .string("yes")]))
+        try require(!invalidLinear.linearIssuesEnabled && !invalidLinear.linearCommentsEnabled && !invalidLinear.linearStateChangesEnabled, "Non-Boolean Linear flags enabled access")
     }
     static func slackContract() throws {
         let json: JSONValue = .object(["channel_id": .string("C123"), "team_id": .string("T123"), "ts": .string("1792034000.000123"), "thread_ts": .string("1792033000.000001"), "text": .string("Request review"), "version": .string("source-v1"), "url": .string("https://example.slack.com/archives/C123/p1792034000000123")])
@@ -206,6 +236,38 @@ import Darwin
         var unsafe = json.object; unsafe["url"] = .string("https://example.slack.com.evil.test/")
         try require(SlackMessage(.object(unsafe))?.url == nil, "Non-Slack URL was treated as a source link")
         print("✓ Slack configuration, string timestamps, threads, source versions, and links verified")
+    }
+    static func linearContract() throws {
+        let states: [JSONValue] = [
+            .object(["id": .string("s-progress"), "name": .string("In Progress"), "type": .string("started"), "position": .number(2)]),
+            .object(["id": .string("s-todo-late"), "name": .string("Ready"), "type": .string("unstarted"), "position": .number(5)]),
+            .object(["id": .string("s-todo"), "name": .string("Todo"), "type": .string("unstarted"), "position": .number(1)]),
+            .object(["id": .string("s-done"), "name": .string("Done"), "type": .string("completed"), "position": .number(3)])
+        ]
+        let json: JSONValue = .object(["id": .string("2f1c6c1e-0000-4000-8000-000000000001"), "identifier": .string("ENG-123"), "title": .string("Fix login"), "description": .string("Steps"), "workspace": .string("acme"), "team_id": .string("team-1"), "state_id": .string("s-todo"), "state_name": .string("Todo"), "state_type": .string("unstarted"), "assignee": .string(""), "priority": .number(2), "priority_label": .string("High"), "due_date": .string("2026-10-20"), "archived": .bool(false), "version": .string("issue-v1"), "url": .string("https://linear.app/acme/issue/ENG-123/fix-login"), "team_states": .array(states)])
+        guard let issue = LinearIssue(json) else { throw Failure(description: "Linear issue did not decode") }
+        try require(issue.parameters()["issue_id"] == json["id"] && issue.parameters()["workspace"] == json["workspace"], "Linear issue identity or workspace was lost")
+        try require(issue.parameters()["expected_version"] == nil, "Search preview incorrectly supplied a verified issue version")
+        try require(issue.parameters(verified: true)["expected_version"] == json["version"], "Verified Linear issue version was not passed to mutations")
+        try require(issue.url?.host == "linear.app" && issue.dueDate == "2026-10-20", "Linear source link or due date was lost")
+        try require(issue.teamStates.map(\.id) == ["s-todo", "s-progress", "s-done", "s-todo-late"], "Linear team states were not ordered by position")
+        var unsafe = json.object; unsafe["url"] = .string("https://linear.app.evil.test/acme/issue/ENG-123")
+        try require(LinearIssue(.object(unsafe))?.url == nil, "Non-Linear URL was treated as a source link")
+        unsafe["url"] = .string("http://linear.app/acme/issue/ENG-123")
+        try require(LinearIssue(.object(unsafe))?.url == nil, "Unencrypted Linear URL was treated as a source link")
+        var missing = json.object; missing["workspace"] = .string("")
+        try require(LinearIssue(.object(missing)) == nil, "Linear issue without a workspace decoded")
+        try require(LinearIssue.suggestedState(for: "todo", in: issue.teamStates)?.id == "s-todo", "To do did not suggest the first unstarted state")
+        try require(LinearIssue.suggestedState(for: "in_progress", in: issue.teamStates)?.id == "s-progress" && LinearIssue.suggestedState(for: "review", in: issue.teamStates)?.id == "s-progress", "Active work did not suggest a started state")
+        try require(LinearIssue.suggestedState(for: "done", in: issue.teamStates)?.id == "s-done", "Done did not suggest a completed state")
+        try require(LinearIssue.suggestedState(for: "blocked", in: issue.teamStates) == nil && LinearIssue.suggestedState(for: "done", in: []) == nil, "Blocked work or a team without states suggested a state")
+        guard let task = BoardTask(.object(["id": .string("task-1"), "project_id": .string("project-1"), "revision": .number(4)])) else { throw Failure(description: "Board task did not decode") }
+        let comment = issue.writeParameters(task: task)
+        try require(comment["task_id"] == .string("task-1") && comment["expected_revision"] == .number(4) && comment["confirmed_by_user"] == .bool(true) && comment["workspace"] == json["workspace"], "Linear comment lost the host task or confirmation")
+        try require(comment["expected_version"] == nil && comment["state_id"] == nil, "Linear comment carried state-change fields")
+        let change = issue.writeParameters(task: task, stateID: "s-done")
+        try require(change["state_id"] == .string("s-done") && change["expected_version"] == json["version"], "Linear state change lost its target or read version")
+        print("✓ Linear configuration, issue identity, source versions, links, write parameters, and state suggestions verified")
     }
     static func githubConfiguration() throws {
         let saved: JSONValue = .object(["auth": .string("gh"), "gh_executable": .string("/opt/homebrew/bin/gh"), "repos": .array([.string("Octo-Org/app.web"), .string("octo/tools")]), "write_enabled": .bool(true), "host": .string("github.com"), "future_option": .object(["keep": .bool(true)])])
@@ -781,7 +843,7 @@ import Darwin
         let detailB = try await client.call("task.get", params: ["task_id": .string(taskBID)], configuration: configB)
         guard let taskB = BoardTask(detailB["task"]) else { throw Failure(description: "Missing Slack test task") }
         appearance.executablePath = gate.path; appearance.dataDirectory = directoryB.path
-        let slackSession = SlackSession(configuration: appearance.connection); slackSession.bind(appearance)
+        let slackSession = PluginSession(configuration: appearance.connection); slackSession.bind(appearance)
         let operation = SlackStatusSend(task: taskB, channelID: "C123", configuration: slackSession.configuration)
         try require(!operation.matches(task: taskB, channelID: "COTHER", configuration: slackSession.configuration) && !operation.matches(task: taskB, channelID: "C123", configuration: configA), "An old send accepted a different destination or board")
         let response = await plugins.run(slack, method: "tasks.send", params: operation.parameters, configuration: slackSession.configuration, requestID: operation.requestID)

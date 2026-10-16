@@ -23,6 +23,7 @@ Implement the workboard core and CLI in Rust, with Swift technologies for the Ma
 | agent-memory | User-configured amem CLI | Reuse existing search and memory policies; separately packaged and disabled by default. |
 | Google Workspace | Python standard library, Google REST APIs, Desktop OAuth/PKCE, Keychain | Separate Calendar/Gmail implementation, permissions, and authentication from the core; choose scopes per service. |
 | Slack | Python standard library, Slack Web API, imported User OAuth Token, Keychain | Separate search/reading/attachments and explicitly enabled sending; journal retries. |
+| Linear | Python standard library, Linear GraphQL API, imported personal API key, Keychain | Separate issue reading/attachments from explicitly enabled comments and state changes; journal retries. |
 | Orca | Python standard library, user-configured Orca CLI | Browse local worktrees/terminals and import tasks; distinguish agent launches from attachment recovery using run IDs and durable journals. |
 | GitHub | Python standard library, GitHub REST API, user-configured gh CLI or imported token in Keychain | Browse, import, and attach issues and pull requests in configured repositories; read linked status; separately enabled writes with journal-protected uncertain results. |
 | Personalization | UserDefaults, versioned theme JSON | Separate task data from presentation; import/export themes. |
