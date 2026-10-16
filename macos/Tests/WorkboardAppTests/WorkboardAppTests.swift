@@ -17,6 +17,7 @@ import Darwin
         try themeFilesAndFreshProcess()
         try connectionIdentities()
         try pluginConfigurationValues()
+        try orcaWorktreeLinks()
         try slackContract()
         try await rpcArgumentsAndErrors()
         if let executable = ProcessInfo.processInfo.environment["WORKBOARD_BIN"], !executable.isEmpty {
@@ -155,6 +156,24 @@ import Darwin
         try require(base != configuration.identity(environment: ["WORKBOARD_BIN": "/tmp/bin-b", "WORKBOARD_DATA_DIR": "/tmp/data-a", "WORKBOARD_SOCKET": "/tmp/socket-a"]), "CLI change did not invalidate connection identity")
         try require(base != configuration.identity(environment: ["WORKBOARD_BIN": "/tmp/bin-a", "WORKBOARD_DATA_DIR": "/tmp/data-b", "WORKBOARD_SOCKET": "/tmp/socket-a"]), "Data directory change did not invalidate connection identity")
         try require(base != configuration.identity(environment: ["WORKBOARD_BIN": "/tmp/bin-a", "WORKBOARD_DATA_DIR": "/tmp/data-a", "WORKBOARD_SOCKET": "/tmp/socket-b"]), "Socket change did not invalidate connection identity")
+    }
+    static func orcaWorktreeLinks() throws {
+        func link(_ id: String, locator: String, provider: String = "orca", kind: String = "workspace", title: String) -> JSONValue {
+            .object(["id": .string(id), "path": .string("/w/" + title), "kind": .string(kind), "provider": .string(provider), "locator": .string(locator), "metadata": .object(["title": .string(title)])])
+        }
+        let artifacts = [link("1", locator: "repo::/w/a", title: "first link"), link("2", locator: "repo::/w/b", title: "other"),
+                         link("3", locator: "repo::/w/a", title: "run link"), link("4", locator: "", title: "no locator"),
+                         link("5", locator: "x", provider: "agent-memory", title: "memory"), link("6", locator: "y", kind: "url", title: "url")]
+            .enumerated().map { TaskArtifact($0.element, index: $0.offset) }
+        try require(TaskArtifact.orcaWorktrees(artifacts).map(\.id) == ["3", "2"], "Linked Orca worktrees were not one per worktree with the newest link first")
+        let repos: [JSONValue] = [.object(["id": .string("app"), "path": .string("/code/app")]), .object(["id": .string("lib"), "path": .string("/code/lib")]),
+                                  .object(["id": .string("tools"), "path": .string("/code/app-tools")])]
+        try require(OrcaPaths.repositories(repos, for: "/code/app") == ["app"], "A project folder did not match its own repository only")
+        try require(OrcaPaths.repositories(repos, for: "/code/app/services/api") == ["app"], "A project folder inside a repository did not match it")
+        try require(OrcaPaths.repositories(repos, for: "/code") == ["app", "lib", "tools"], "A parent project folder did not match the repositories inside it")
+        try require(OrcaPaths.repositories(repos, for: "").isEmpty && OrcaPaths.repositories(repos, for: "/elsewhere").isEmpty, "An unrelated or empty folder matched a repository")
+        try require(OrcaPaths.summary(repository: "app", branch: "refs/heads/feature/x", status: "") == "app · feature/x", "Worktree summary was not shortened")
+        print("✓ Orca worktree links: one entry per worktree, project folder matching, and summaries verified")
     }
     static func pluginConfigurationValues() throws {
         let saved: JSONValue = .object(["calendar_enabled": .bool(false), "gmail_enabled": .bool(true), "account": .string("work-mail"), "credentials_file": .string("/custom/oauth.json"), "future_option": .object(["keep": .bool(true)])])

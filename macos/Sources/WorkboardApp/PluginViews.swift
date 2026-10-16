@@ -354,14 +354,9 @@ private struct OrcaBrowserView: View {
     }
     /// The board project whose folder is this worktree's Orca repository, or contains the worktree.
     private func project(for item: JSONValue) -> BoardProject? {
-        let paths = [item["repo_path"].string, item["path"].string].compactMap { $0 }.map(Self.canonical)
-        return board.projects.first { project in
-            guard project.directory.hasPrefix("/") else { return false }
-            let directory = Self.canonical(project.directory)
-            return paths.contains { $0 == directory || $0.hasPrefix(directory + "/") }
-        }
+        let paths = [item["repo_path"].string, item["path"].string].compactMap { $0 }
+        return board.projects.first { project in paths.contains { OrcaPaths.path($0, isInside: project.directory) } }
     }
-    private static func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
     private func loadTerminals(_ item: JSONValue) async {
         if let result = await plugins.run(plugin, method: "terminals.list", params: ["worktree_id": item["id"]], configuration: appearance.connection) {
             terminals = result["terminals"].array
@@ -409,6 +404,137 @@ private struct OrcaBrowserView: View {
             await loadTerminals(item)
         }
         await board.reload(force: true)
+    }
+}
+
+/// Folder comparisons between board projects and Orca repositories or worktrees.
+enum OrcaPaths {
+    static func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
+    /// Whether `path` is `folder` or inside it.
+    static func path(_ path: String, isInside folder: String) -> Bool {
+        guard path.hasPrefix("/"), folder.hasPrefix("/") else { return false }
+        let candidate = canonical(path), container = canonical(folder)
+        return candidate == container || candidate.hasPrefix(container.hasSuffix("/") ? container : container + "/")
+    }
+    /// Connected repositories for a project folder: the repository that contains the folder, or else those inside it.
+    static func repositories(_ repos: [JSONValue], for directory: String) -> [String] {
+        let containing = repos.filter { path(directory, isInside: $0["path"].string ?? "") }
+        let matched = containing.isEmpty ? repos.filter { path($0["path"].string ?? "", isInside: directory) } : containing
+        return matched.compactMap { $0["id"].string }
+    }
+    static func summary(repository: String?, branch: String?, status: String? = nil) -> String {
+        let shortBranch = branch.map { $0.hasPrefix("refs/heads/") ? String($0.dropFirst(11)) : $0 }
+        return [repository, shortBranch, status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// Links an Orca worktree to a task from its card or details. Lists the task project's repository first.
+struct OrcaWorktreePicker: View {
+    @EnvironmentObject private var store: BoardStore
+    @EnvironmentObject private var appearance: AppearanceSettings
+    @Environment(\.dismiss) private var dismiss
+    let task: BoardTask
+    @StateObject private var plugins = PluginStore()
+    @State private var projectRepoIDs: [String] = []
+    @State private var showAll = false
+    @State private var worktrees: [JSONValue] = []
+    @State private var loaded = false
+    @State private var truncated = false
+    @State private var linked: Set<String> = []
+    @State private var query = ""
+
+    private var project: BoardProject? { store.projects.first { $0.id == task.projectID } }
+    private var visible: [JSONValue] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return worktrees.filter { item in
+            (showAll || projectRepoIDs.isEmpty || projectRepoIDs.contains(item["repo_id"].string ?? ""))
+            && (needle.isEmpty || [item["title"].string, item["branch"].string, item["path"].string].contains { $0?.lowercased().contains(needle) == true })
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Link an Orca worktree").font(.title3.weight(.semibold))
+                Text(task.title).font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+            }.padding([.horizontal, .top], 22).padding(.bottom, 14)
+            HStack(spacing: 12) {
+                TextField("Filter by name, branch, or folder", text: $query).textFieldStyle(.roundedBorder)
+                if !projectRepoIDs.isEmpty { Toggle("All repositories", isOn: $showAll).toggleStyle(.checkbox) }
+            }.padding(.horizontal, 22)
+            if loaded && projectRepoIDs.isEmpty && store.orcaPlugin != nil {
+                Text("No connected Orca repository matches the folder of \(project?.name ?? "this project"), so every connected repository is shown. Add the repository in Orca plugin settings to narrow this list.")
+                    .font(.caption).foregroundStyle(Color.secondary).padding(.horizontal, 22).padding(.top, 8)
+            }
+            Divider().padding(.top, 12)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !loaded { ProgressView("Reading Orca worktrees…").controlSize(.small).padding(30).frame(maxWidth: .infinity) }
+                    else if visible.isEmpty { Text(worktrees.isEmpty ? "No worktrees found." : "No worktrees match the filter.").font(.callout).foregroundStyle(Color.secondary).padding(30).frame(maxWidth: .infinity) }
+                    ForEach(Array(visible.enumerated()), id: \.offset) { row in
+                        let item = row.element
+                        let identifier = item["id"].string ?? ""
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item["title"].string ?? item["path"].string ?? "Worktree").font(.callout.weight(.medium)).lineLimit(1)
+                                Text(OrcaPaths.summary(repository: showAll || projectRepoIDs.count != 1 ? item["repo_name"].string : nil, branch: item["branch"].string, status: item["workspace_status"].string)).font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                                Text(item["path"].string ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer(minLength: 8)
+                            if linked.contains(identifier) { Label("Linked", systemImage: "checkmark").font(.caption).foregroundStyle(Color.secondary) }
+                            else { Button("Link") { link(identifier) }.disabled(plugins.busy || identifier.isEmpty) }
+                        }.padding(.horizontal, 22).padding(.vertical, 10)
+                        Divider().padding(.leading, 22)
+                    }
+                }
+            }
+            Divider()
+            HStack(spacing: 10) {
+                if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(3).textSelection(.enabled) }
+                else if truncated { Text("Showing partial results. Filter the list or use the CLI for every worktree.").font(.caption).foregroundStyle(Color.secondary) }
+                Spacer()
+                if plugins.busy { ProgressView().controlSize(.small) }
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(16)
+        }.frame(width: 540, height: 560)
+            .task { await load() }
+            .onChange(of: showAll) { if projectRepoIDs.count == 1 { Task { await loadWorktrees() } } }
+    }
+
+    private func load() async {
+        guard let plugin = store.orcaPlugin else { plugins.error = "Connect the Orca plugin in Settings → Plugins first."; loaded = true; return }
+        let configuration = appearance.connection
+        if let current = await plugins.call("task.get", params: ["task_id": .string(task.id)], configuration: configuration) {
+            linked = Set(current["artifacts"].array.map { TaskArtifact($0, index: 0) }.filter(\.isOrcaWorktree).map(\.locator))
+        }
+        if let check = await plugins.run(plugin, method: "check", configuration: configuration), let directory = project?.directory {
+            projectRepoIDs = OrcaPaths.repositories(check["repos"].array, for: directory)
+        }
+        await loadWorktrees()
+    }
+    private func loadWorktrees() async {
+        guard let plugin = store.orcaPlugin else { return }
+        var params: [String: JSONValue] = ["limit": .number(100)]
+        if !showAll && projectRepoIDs.count == 1 { params["repo_id"] = .string(projectRepoIDs[0]) }
+        if let result = await plugins.run(plugin, method: "worktrees.list", params: params, configuration: appearance.connection) {
+            worktrees = result["worktrees"].array; truncated = result["truncated"].bool ?? false
+        }
+        loaded = true
+    }
+    private func link(_ worktreeID: String) {
+        guard let plugin = store.orcaPlugin else { return }
+        let configuration = appearance.connection
+        let identity = configuration.identity()
+        Task {
+            // Linking adds a board link only, so it uses the current revision instead of the card's copy.
+            guard let current = await plugins.call("task.get", params: ["task_id": .string(task.id)], configuration: configuration),
+                  await plugins.run(plugin, method: "worktrees.attach", params: ["worktree_id": .string(worktreeID), "task_id": .string(task.id), "expected_revision": current["task"]["revision"]], configuration: configuration) != nil,
+                  appearance.connection.identity() == identity else { return }
+            linked.insert(worktreeID)
+            store.notice = "Orca worktree linked."
+            await store.reload(force: true)
+            if store.selectedTaskID == task.id { await store.loadDetail(task.id) }
+            dismiss()
+        }
     }
 }
 
