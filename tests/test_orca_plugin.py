@@ -156,10 +156,14 @@ class OrcaProvider(Fixture):
         self.assertTrue(first["ok"], first)
         create = self.calls()[-1]
         command = shlex.split(create[create.index("--command") + 1])
-        self.assertEqual(command[0], "codex")
-        self.assertEqual(len(command), 2)
-        self.assertIn(prompt, command[1])
-        self.assertIn("--socket /tmp/s.sock", command[1])
+        # The launched agent acts as the run's assignee on the same board.
+        self.assertEqual(command[:4], ["env", "WORKBOARD_AGENT=orca:codex", "WORKBOARD_DATA_DIR=/tmp/data dir",
+                                       "WORKBOARD_SOCKET=/tmp/s.sock"])
+        self.assertEqual(command[4], "codex")
+        self.assertEqual(len(command), 6)
+        self.assertIn(prompt, command[5])
+        self.assertIn("--socket /tmp/s.sock", command[5])
+        self.assertIn("task review task-1 --run run-1", command[5])
         self.assertFalse(marker.exists())
         self.assertEqual(first["requests"][0]["params"]["run_id"], "run-1")
         second = self.invoke("agents.start", params, request_id="request-2")
@@ -282,6 +286,8 @@ class OrcaHost(Fixture):
         command = creates[0][creates[0].index("--command") + 1]
         self.assertIn("Actual task title", command)
         self.assertNotIn("Forged title", command)
+        self.assertIn("Agent Workboard protocol", command, "the host passes the shared agent protocol")
+        self.assertIn("WORKBOARD_AGENT=orca:codex", command)
         self.assertIn(str(self.socket), command)
         detail = self.rpc("task.get", {"task_id": task["id"]})
         self.assertEqual(detail["task"]["status"], "in_progress")

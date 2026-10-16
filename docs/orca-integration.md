@@ -74,7 +74,7 @@ sequenceDiagram
     B->>S: Attach worktree/terminal to run
 ```
 
-The agent receives goals, criteria, next action, and board CLI/data/socket paths. Quote the prompt as one shell argument. Instruct it to reread current work, record verification and next actions, and request review instead of completing merely because its response ended.
+The agent receives goals, criteria, next action, board CLI/data/socket paths, and the shared [agent protocol](../integrations/agents/protocol.md). The terminal command sets `WORKBOARD_AGENT=orca:<agent>`, `WORKBOARD_DATA_DIR`, and `WORKBOARD_SOCKET`, so the agent's board commands act as the run's assignee on the same board. The review command uses `task review --run` instead of a raw request. Quote the prompt as one shell argument. Instruct it to reread current work, record verification and next actions, and request review instead of completing merely because its response ended.
 
 Default agent commands are `codex` and `claude`. Override paths/options through `agent_commands`; array elements are literal arguments and the prompt is appended last. Shell pipelines/command strings are not accepted.
 

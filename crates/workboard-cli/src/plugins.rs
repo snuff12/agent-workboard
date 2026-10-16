@@ -668,6 +668,7 @@ fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str)
                 }
                 execution_params["task"] = current;
                 execution_params["task_runs"] = context["result"]["runs"].clone();
+                execution_params["agent_protocol"] = json!(crate::agent::PROTOCOL);
                 execution_params["board_connection"] = json!({
                     "executable": std::env::current_exe().map_err(|e| e.to_string())?,
                     "data_dir": client.data_dir,

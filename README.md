@@ -93,6 +93,7 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 | [Google Workspace](docs/google-workspace.md) | Calendar, Gmail, account setup, verification limits |
 | [Slack](docs/slack.md) | Search, source reading, task attachments, sending, tokens |
 | [Orca](docs/orca-integration.md) | Worktrees, terminals, imports, attachments, launches |
+| [Agent integration](docs/agent-integration.md) | Claude Code and Codex session context, protocol, identity, sandbox rules |
 | [Verification](docs/verification.md) | Passing checks, installation evidence, remaining external checks |
 
 ## Everyday workflow
@@ -100,6 +101,8 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 Create projects and subtasks through the CLI without plugins. Assign a task and start a run to show it as In progress in the app. The widget shows current work, tasks due today, and work completed today. Another agent can continue from artifacts, next actions, and attached files or URLs.
 
 The shared plugin host and all four integration packages are implemented. Plugin failures, disabling, and removal preserve existing task data. See the verification record for the tested scope.
+
+Claude Code and Codex sessions can connect to the board with the optional agent kit: `scripts/install-agent-kit.sh` installs a plugin per tool that adds board context at session start and the agent protocol as a skill. See [Agent integration](docs/agent-integration.md).
 
 The widget shows its last update time. The service requests a refresh when it changes the snapshot, and macOS controls the actual refresh schedule. While active, the app periodically checks the service's change sequence.
 

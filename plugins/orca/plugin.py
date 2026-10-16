@@ -161,17 +161,22 @@ def start_agent(orca, item, params, config):
     cli = [required(connection, "executable"), "--data-dir", required(connection, "data_dir"),
            "--socket", required(connection, "socket")]
     read = shlex.join([*cli, "task", "show", task["id"], "--json"])
-    review = shlex.join([*cli, "rpc", "task.review", "--params", json.dumps({"task_id": task["id"],
-        "run_id": run_id, "agent_id": "orca:" + agent, "summary": "Record verified results and remaining decisions here.",
-        "expected_revision": "Replace with the latest integer task.revision"}, ensure_ascii=False), "--json"])
+    # WORKBOARD_AGENT below makes these commands act as the run's assignee.
+    review = shlex.join([*cli, "task", "review", task["id"], "--run", run_id,
+                         "--summary", "Replace with verified results and remaining decisions", "--json"])
+    protocol = params.get("agent_protocol")
+    protocol = protocol if isinstance(protocol, str) and len(protocol) <= 20000 else ""
     prompt = ("Perform the board task.\nTask ID: " + task["id"] + "\nRun ID: " + run_id
               + "\nTitle: " + task.get("title", "") + "\nGoal: " + task.get("goal", "")
               + "\nCompletion criteria: " + task.get("completion_criteria", "") + "\nNext action: " + task.get("next_action", "")
               + "\n\nRead the latest task before starting and before changing its status:\n" + read
               + "\n\nDo not complete a task merely because a response ended. Record verification results and the next action, then request review."
-              + " Replace summary and expected_revision in the following command with actual values:\n" + review
+              + " Replace the summary in the following command with actual values:\n" + review
+              + ("\n\n" + protocol if protocol else "")
               + "\n\nAdditional instructions:\n" + extra)
-    shell_command = shlex.join([*command, prompt])
+    environment = ["env", "WORKBOARD_AGENT=orca:" + agent, "WORKBOARD_DATA_DIR=" + connection["data_dir"],
+                   "WORKBOARD_SOCKET=" + connection["socket"]]
+    shell_command = shlex.join([*environment, *command, prompt])
     # Mutable board text must not prevent recovering an already launched run's
     # original link after the task is edited or a newer run has started.
     fingerprint = hashlib.sha256(json.dumps({"command": command, "prompt": extra, "connection": cli,

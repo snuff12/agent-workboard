@@ -1,0 +1,8 @@
+{
+  "name": "workboard",
+  "version": "0.1.0",
+  "description": "Connect Claude Code sessions to Agent Workboard: board context at session start and the agent protocol as a skill.",
+  "author": {
+    "name": "Agent Workboard"
+  }
+}

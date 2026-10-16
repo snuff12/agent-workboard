@@ -1,0 +1,31 @@
+# Agent Workboard commands reach the local board service through a Unix socket, which the Codex
+# sandbox blocks. Ordinary board work runs outside the sandbox without a prompt; the service still
+# validates claims, revisions, and retries. Destructive, broad, or user-only commands ask first.
+# The installer appends the same rules for the absolute paths of the installed executable.
+prefix_rule(
+    pattern = ["workboard", ["project", "task", "inbox", "template", "view", "board", "events", "doctor", "agent"]],
+    decision = "allow",
+    justification = "Board reads and task updates go through the board service.",
+    match = [["workboard", "task", "show", "TASK", "--json"], ["workboard", "agent", "context"]],
+)
+prefix_rule(
+    pattern = ["workboard", "task", ["delete", "complete", "decide"]],
+    decision = "prompt",
+    justification = "Deleting work, completing tasks, and deciding reviews belong to the user.",
+)
+prefix_rule(
+    pattern = ["workboard", ["project", "template", "view"], "delete"],
+    decision = "prompt",
+    justification = "Deleting board data needs the user's approval.",
+)
+prefix_rule(
+    pattern = ["workboard", "inbox", ["promote", "dismiss"]],
+    decision = "prompt",
+    justification = "The user sorts the inbox.",
+)
+prefix_rule(
+    pattern = ["workboard", ["rpc", "backup", "export", "plugin", "serve"]],
+    decision = "prompt",
+    justification = "Raw requests, backups, exports, plugins, and the service need the user's approval.",
+    match = [["workboard", "backup", "restore", "FILE"]],
+)
