@@ -142,7 +142,8 @@ struct PluginConfigurationDraft {
     static let accountLabelRule = "Write the account label with 1 to 80 ASCII letters, digits, periods, underscores, hyphens, or @, without spaces."
     private func keychainAccount() throws -> JSONValue {
         let label = account.isEmpty ? "default" : account
-        guard Self.isValidKeychainAccount(label) else { throw WorkboardError(message: Self.accountLabelRule) }
+        // A saved label keeps working for reading and disconnecting, so only a new label must suit `security -i`.
+        guard Self.isValidKeychainAccount(label) || label == original["account"]?.string else { throw WorkboardError(message: Self.accountLabelRule) }
         return .string(label)
     }
 

@@ -17,6 +17,8 @@ A review of the merged Orca card links, Linear, GitHub, and trash changes found 
 
 Rust 82, Python 295, the Swift app runner, format, clippy, and the English-only check passed. No real Slack, Linear, Google, or GitHub account and no user Keychain item was used.
 
+A second, independent review found that the label check also blocked reading and disconnecting connections made earlier with other labels, which `security -i` had stored (a temporary keychain stored `two words`, `café`, and a 90-character label). The plugins now check the label only when storing a key and before a connection starts; reading and removal pass the label as its own argument. The app checks a label only when it changes. Python covers unsafe labels never stored or connected, saved labels read and disconnected without `security -i`, and safe labels stored; the Swift runner covers saving other settings with a saved label and refusing a changed one. The same review's claim that `plutil -extract result.plugins raw` cannot count an array was checked and is wrong: it prints the array's length, and a five-entry list fails the six-plugin check.
+
 ## Linear workflow states, card deletion, and the trash
 
 On October 16, 2026, the board adopted Linear's default workflow (Backlog, Todo, In Progress, In Review, Done, Canceled), and deleting a card now moves it to a Trash with restore, permanent deletion, and Empty Trash. Database version 6 rebuilds the tasks table to widen its status constraint and add the trash columns; the wire and widget formats remain version 1.
