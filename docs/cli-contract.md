@@ -159,7 +159,7 @@ The core ships without integrations. Installed plugins remain disabled. Return `
 
 Core `doctor` judges only core health. Absent/disabled/failed integrations do not fail it. Explicit `plugin check` checks enabled external connections. `plugin list` returns installation/enabled metadata without configuration. `plugin config <id>` / RPC `plugin.config {id}` returns `{id,config}`, including while disabled. Neither read starts the provider or task service.
 
-Use identical `project`/`domain` parameters for scoped searches and reads. `--params` accepts a JSON object. Workspace, Slack, and Orca share lifecycle rules; see their guides for capabilities.
+Use identical `project`/`domain` parameters for scoped searches and reads. `--params` accepts a JSON object. Workspace, Slack, Linear, and Orca share lifecycle rules; see their guides for capabilities.
 
 ## Shared RPC and widget paths
 
