@@ -312,6 +312,11 @@ class Workflows(unittest.TestCase):
         self.assertGreater(after["revision"], before["revision"])
         self.assertEqual(self.cli("task", "update", survivor["id"], "--title", "Stale edit",
                                   revision=before["revision"], ok=False)["error"]["code"], "REVISION_CONFLICT")
+        # The trash keeps the Inbox link until the deletion becomes permanent.
+        self.assertEqual(self.cli("inbox", "list")["result"]["items"][0]["task_id"], root["id"])
+        self.cli("trash", "delete", root["id"], request_id="purge-tree")
+        self.assertEqual(self.cli("trash", "list")["result"]["items"], [])
+        after = self.show(survivor)["task"]
         self.stop_server()
         self.start_server()
         self.assertEqual(deleted, self.cli(*arguments, request_id="delete-tree", revision=root["revision"]))

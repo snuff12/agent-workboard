@@ -9,7 +9,9 @@ struct WidgetSnapshotProbe {
           {"id":"low","title":"Low priority","status":"todo","priority":1,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"},
           {"id":"high","title":"High priority","status":"todo","priority":3,"updated_at":"2026-10-15T00:00:01Z","project_id":"p","parent_id":"now"},
           {"id":"review","title":"Needs review","status":"review","priority":2,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"},
-          {"id":"done","title":"Done","status":"done","priority":3,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"}
+          {"id":"done","title":"Done","status":"done","priority":3,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"},
+          {"id":"parked","title":"Backlog","status":"backlog","priority":3,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"},
+          {"id":"dropped","title":"Canceled","status":"canceled","priority":3,"updated_at":"2026-10-15T00:00:00Z","project_id":"p"}
         ]}
         """
         let snapshot = try WidgetSnapshot.decode(Data(fixture.utf8))
@@ -48,6 +50,8 @@ struct WidgetSnapshotProbe {
           {"id":"meeting","title":"Meeting today","status":"todo","priority":0,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","scheduled_start":"2026-10-15T10:00:00+09:00","scheduled_end":"2026-10-15T11:00:00+09:00"},
           {"id":"tomorrow","title":"Due tomorrow","status":"todo","priority":3,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","due_at":"2026-10-16"},
           {"id":"undated","title":"No date","status":"todo","priority":3,"updated_at":"2026-10-01T00:00:00Z","project_id":"p"},
+          {"id":"parked-today","title":"Backlog due today","status":"backlog","priority":0,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","due_at":"2026-10-15T20:00:00+09:00"},
+          {"id":"canceled-overdue","title":"Canceled after its deadline","status":"canceled","priority":0,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","due_at":"2026-10-14"},
           {"id":"done-today","title":"Completed today","status":"done","priority":0,"updated_at":"2026-10-15T00:30:00Z","project_id":"p"},
           {"id":"done-yesterday","title":"Completed yesterday","status":"done","priority":0,"updated_at":"2026-10-14T14:59:00Z","project_id":"p"}
         ]}
@@ -56,12 +60,13 @@ struct WidgetSnapshotProbe {
         let sections = snapshot.sections(at: now, calendar: calendar)
         precondition(sections.map(\.section) == [.now, .today, .done], "Show Needs review only when it has items")
         precondition(sections[0].tasks.map(\.id) == ["working"], "In progress")
-        precondition(sections[1].tasks.map(\.id) == ["overdue", "due-today", "meeting", "due-later"],
-            "Due today: order overdue, today’s deadlines and meetings by time; exclude tomorrow and undated tasks")
+        precondition(sections[1].tasks.map(\.id) == ["overdue", "due-today", "meeting", "due-later", "parked-today"],
+            "Due today: order overdue, today’s deadlines and meetings by time; include Backlog deadlines; exclude tomorrow, undated, and canceled tasks")
         precondition(sections[2].tasks.map(\.id) == ["done-today"], "Completed today includes only tasks completed today in Seoul")
         let overdue = snapshot.tasks.first { $0.id == "overdue" }!
         precondition(overdue.isOverdue(at: now, calendar: calendar), "Overdue date-only deadline")
         precondition(!snapshot.tasks.first { $0.id == "due-today" }!.isOverdue(at: now, calendar: calendar), "Today’s deadline is not overdue yet")
+        precondition(!snapshot.tasks.first { $0.id == "canceled-overdue" }!.isOverdue(at: now, calendar: calendar), "Canceled work is never overdue")
         precondition(WidgetSnapshot.allocate(rows: 3, among: [5, 0, 5]) == [2, 0, 1], "Allocate rows across expanded sections in round-robin order")
         precondition(WidgetSnapshot.allocate(rows: 9, among: [1, 2, 0]) == [1, 2, 0], "Leave unused rows empty")
         let suite = "local.agentworkboard.probe.\(UUID().uuidString)"

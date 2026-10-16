@@ -82,9 +82,26 @@ class EndToEnd(unittest.TestCase):
                            "--expected-revision", parent["revision"])["result"]
         self.assertEqual(deleted["deleted_task_ids"], [parent["id"], child])
         self.cli("task", "show", child, ok=False)
-        self.cli("task", "add", "--project", project, "--title", "With the project")
-        self.assertEqual(self.cli("project", "delete", project, ok=False)["error"]["code"], "HAS_TASKS")
-        self.assertEqual(len(self.cli("project", "delete", project, "--with-tasks")["result"]["deleted_task_ids"]), 1)
+        trash = self.cli("trash", "list")["result"]["items"]
+        self.assertEqual([item["task"]["id"] for item in trash], [parent["id"]])
+        self.assertEqual(trash[0]["subtask_count"], 1)
+        self.assertEqual(self.cli("trash", "restore", child, ok=False)["error"]["code"], "INVALID_STATE")
+        restored = self.cli("trash", "restore", parent["id"])["result"]
+        self.assertEqual(restored["restored_task_ids"], [parent["id"], child])
+        self.assertEqual(self.cli("task", "show", child)["result"]["task"]["parent_id"], parent["id"])
+        self.cli("task", "delete", parent["id"], "--with-subtasks")
+        purged = self.cli("trash", "delete", parent["id"])["result"]
+        self.assertEqual(purged["deleted_task_ids"], [parent["id"], child])
+        self.assertEqual(self.cli("trash", "delete", parent["id"], ok=False)["error"]["code"], "NOT_FOUND")
+        self.assertEqual(self.cli("trash", "empty")["result"]["deleted_task_ids"], [])
+        kept = self.cli("task", "add", "--project", project, "--title", "With the project")["result"]["task_id"]
+        trashed = self.cli("task", "add", "--project", project, "--title", "Trashed with the project")["result"]["task_id"]
+        self.cli("task", "delete", trashed)
+        refused = self.cli("project", "delete", project, ok=False)["error"]
+        self.assertEqual(refused["code"], "HAS_TASKS")
+        self.assertIn("1 in the trash", refused["message"])
+        self.assertEqual(set(self.cli("project", "delete", project, "--with-tasks")["result"]["deleted_task_ids"]), {kept, trashed})
+        self.assertEqual(self.cli("trash", "list")["result"]["items"], [])
         self.assertEqual(self.cli("project", "list")["result"]["projects"], [])
 
     def test_task_hierarchy_retry_restore_and_resume(self):

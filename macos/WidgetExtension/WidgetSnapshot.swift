@@ -51,7 +51,8 @@ struct WidgetSnapshot: Decodable, Sendable {
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
         let working = tasks(for: .now)
         let review = tasks(for: .review)
-        let due = tasks.filter { $0.status == "todo" && $0.isDue(before: tomorrow, from: today, calendar: calendar) }
+        // A deadline today still matters for work parked in Backlog.
+        let due = tasks.filter { ["backlog", "todo"].contains($0.status) && $0.isDue(before: tomorrow, from: today, calendar: calendar) }
             .sorted { lhs, rhs in
                 let left = lhs.todayOrder(calendar: calendar), right = rhs.todayOrder(calendar: calendar)
                 if left != right { return left < right }
@@ -131,7 +132,7 @@ struct WidgetTask: Decodable, Identifiable, Sendable {
     }
 
     func isOverdue(at now: Date, calendar: Calendar) -> Bool {
-        guard status != "done", let due = Self.parse(dueAt, calendar: calendar) else { return false }
+        guard status != "done", status != "canceled", let due = Self.parse(dueAt, calendar: calendar) else { return false }
         return dueAt?.count == 10 ? due < calendar.startOfDay(for: now) : due < now
     }
 

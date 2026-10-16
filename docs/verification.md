@@ -2,6 +2,20 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## Linear workflow states, card deletion, and the trash
+
+On October 16, 2026, the board adopted Linear's default workflow (Backlog, Todo, In Progress, In Review, Done, Canceled), and deleting a card now moves it to a Trash with restore, permanent deletion, and Empty Trash. Database version 6 rebuilds the tasks table to widen its status constraint and add the trash columns; the wire and widget formats remain version 1.
+
+| Check | Result |
+| --- | --- |
+| Rust | 81 passed (core 65, CLI 12, service 4). Tests cover version 5 boards and backups upgrading with tasks, runs, artifacts, dependencies, search, and foreign keys intact; Backlog staying out of ready lists; Canceled interrupting runs, refusing claim/start, and releasing dependents; and the trash: hidden from every live read and the widget, deletion groups restored together, subtasks waiting for a trashed parent, permanent deletion including earlier trashed subtasks, Empty Trash, retries, backup/restore, export, and project deletion. |
+| Real-board migration | A read-only copy of this Mac's version 5 board (13 tasks, 6 runs, 20 artifacts) upgraded to version 6 with identical task ID/status/revision/title rows, clean integrity and foreign-key checks, and working search. A task moved to the trash and restored on that copy kept its rows. The copy's widget path setting was removed first, the copy was deleted afterward, and the real board remains version 5 until the installed service is updated. |
+| Python | 153 passed, including CLI `trash list/restore/delete/empty`, project deletion with trashed tasks, Inbox links kept until permanent deletion, Codex rules that prompt for trash changes, and the agent protocol. |
+| Swift runners | App, workflow, and planner runners passed against the actual service. A new check covers Backlog column drafts, cancel and reopen, refusal of a stale delete, Undo after deletion, restore, permanent deletion counts, and Empty Trash. |
+| Widget | Compilation, entitlements, and the snapshot probe passed; due-today rows include Backlog deadlines, and Canceled work is never overdue. |
+| Native UI | XCUITest drove the app on this Mac with an isolated board. Seven of eight tests passed. The Backlog/Cancel/Delete/Trash test covered a Backlog card from the CLI, the Backlog column's add button, cancel from the card menu, a canceled confirmation that kept the task, moving a parent with its subtask to Trash, Restore, Delete Permanently, and Empty Trash. The CLI status, drag/complete, subtask, window-close/relaunch, backup/Markdown, and task-link tests also passed. The subtask test needed its stale `Add artifacts and links` label fixed to `Add Artifacts and links`, and now waits for the details to show the started subtask before clicking a section button that the reload moves. The theme test fails at opening Settings with ⌘, both here and on the unmodified base commit, so that failure predates this work. A run while the Mac was in active use failed at launch for every test because macOS kept the test app in the background; the passing run was on an idle Mac. |
+| Previews | Offscreen light/dark renders with real disposable data show the new columns, the canceled subtask icon, progress counts that exclude canceled work, and the Trash screen. |
+
 ## Plugin readiness audit
 
 The October 15, 2026 follow-up checked all four current plugin packages with an isolated board. Actual amem search/read/evidence attachment and Orca worktree browsing/import/attachment passed. Google Workspace and Slack passed mocked provider/host checks and real missing-credential isolation checks; authenticated account operations remain unverified. The audit also reproduced and fixed loss of the calendar time zone when importing date-only events. See the [plugin readiness report](plugin-readiness.md) for exact coverage and remaining checks.

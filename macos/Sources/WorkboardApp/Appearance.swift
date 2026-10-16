@@ -161,7 +161,7 @@ struct SettingsView: View {
                 Picker("Card density", selection: $appearance.theme.density) { ForEach(CardDensity.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
                 HStack { Text("Text size"); Slider(value: $appearance.theme.fontScale, in: 0.85...1.3, step: 0.05); Text("\(Int(appearance.theme.fontScale * 100))%").monospacedDigit().frame(width: 45) }
                 Toggle("Show sidebar", isOn: $appearance.theme.showSidebar)
-                Toggle("Show Done column", isOn: $appearance.theme.showCompleted)
+                Toggle("Show Done and Canceled columns", isOn: $appearance.theme.showCompleted)
                 Toggle("Show subtasks on the board", isOn: $appearance.theme.showSubtasksOnBoard)
             } header: { Text("Board display") }
             Section {

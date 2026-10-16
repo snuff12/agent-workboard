@@ -9,6 +9,7 @@ workboard project list --json
 workboard project add --name <name> --directory <path> --json
 workboard task add --project <project-id> --title <title> --next-action <action> --json
 workboard task add --project <project-id> --parent <task-id> --title <title> --json
+workboard task add --project <project-id> --title <title> --status backlog --json
 workboard task list --project <project-id> --status todo --json
 workboard task list --parent <task-id> --json
 workboard task show <task-id> --json
@@ -28,23 +29,48 @@ workboard events --after <sequence> --json
 workboard task attach <task-id> --source <path-or-url> --json
 workboard task delete <task-id> --expected-revision <revision> --json
 workboard task delete <task-id> --with-subtasks --json
+workboard trash list --json
+workboard trash restore <task-id> --json
+workboard trash delete <task-id> --json
+workboard trash empty --json
 workboard project delete <project-id> --with-tasks --agent <agent-id> --json
 workboard doctor --json
 ```
 
-Commands that act for an agent (claim, start, review, complete, pause, heartbeat, release, update, attach, and deletion) add `agent_id` from `WORKBOARD_AGENT`, or from `CODEX_THREAD_ID` as `codex:<thread>`, when `--agent` is omitted. `inbox capture` uses the same ID as its source. `rpc` never adds it. `agent context` summarizes board work for the current directory, `agent brief` prints the agent protocol, and `agent hook --client claude|codex` is the session-start hook. See [Agent integration](agent-integration.md).
+Commands that act for an agent (claim, start, review, complete, pause, heartbeat, release, update, attach, deletion, and trash actions) add `agent_id` from `WORKBOARD_AGENT`, or from `CODEX_THREAD_ID` as `codex:<thread>`, when `--agent` is omitted. `inbox capture` uses the same ID as its source. `rpc` never adds it. `agent context` summarizes board work for the current directory, `agent brief` prints the agent protocol, and `agent hook --client claude|codex` is the session-start hook. See [Agent integration](agent-integration.md).
+
+## Statuses
+
+Task statuses follow Linear's default workflow: `backlog`, `todo`, `in_progress`, `review`, `done`, and `canceled`. The app shows them as Backlog, Todo, In Progress, In Review, Done, and Canceled.
+
+- New tasks start in `todo`. `task add`, `template apply`, and `inbox promote` accept `--status backlog` or `--status todo`; other initial statuses return `INVALID_PARAMS`. Runs, reviews, and outcomes move tasks forward.
+- Backlog tasks are never `ready`, so `task ready` and `agent context` skip them until someone moves them to Todo. Starting a Backlog task directly is allowed.
+- `task update --status canceled` ends a running run as interrupted and keeps the assignee. A canceled task rejects `claim` and `start` with `INVALID_STATE` until it is updated back to `backlog` or `todo`. Canceling needs no completion summary.
+- Done and Canceled close a task. Closed prerequisites leave `blocked_by`, schedule previews ignore closed tasks, and `task show` reports `canceled_child_count` beside `child_count` and `completed_child_count`.
+- Database version 6 adds Backlog and Canceled. The service upgrades an older board when it opens it and restores older backups through a private upgraded copy. Earlier service versions cannot open a version 6 board.
 
 Subtasks created with `--parent` use ordinary task commands for state, assignment, and artifacts. Parent details include child lists and completed counts. Missing mutation inputs return structured errors an agent can act on.
 
-Deletion removes tasks, their runs, and artifact links. Without explicit inclusion flags, children produce `HAS_SUBTASKS` and project tasks produce `HAS_TASKS`. Use `--with-subtasks` or `--with-tasks`. For either deletion command, `--agent` rejects any included task held by another agent with `CLAIM_CONFLICT`. Task `--expected-revision` protects against concurrent changes. Projects have no revision and reject that option. Deletion events retain removed task/run/artifact data. Revision tombstones never regress across restore/retry.
+## Trash
 
-Deletion also removes checklist/review/dependency references and retains them in history. Surviving dependents lose the removed prerequisite and receive new revisions. Inbox source/note/processed state are preserved; only the deleted task link is cleared. Reconversion does not recreate deleted work automatically.
+`task delete` moves a task to the trash. Without `--with-subtasks`, a task with subtasks returns `HAS_SUBTASKS`; with it, the subtasks move too and form one trash entry. `--agent` rejects any included task held by another agent with `CLAIM_CONFLICT`, and `--expected-revision` protects against concurrent changes. Running runs end as interrupted. The app deletes through the same request after a confirmation, sending the revision it showed and `with_subtasks` when it listed subtasks.
 
-Plugins are restricted to approved task reads/mutations. Deletion, restore, and widget configuration are refused even if declared in a manifest. Validate all response operations before applying any.
+A trashed task keeps its runs, artifacts, checklist, review history, dependency links, and Inbox link. Every live read skips it: lists, search, `task show` (`NOT_FOUND` saying the task is in the trash), parent details, readiness, schedule previews, and the widget. A trashed prerequisite no longer blocks its dependents. Trashed tasks cannot be changed, used as parents, or linked. Dependents of trashed or restored tasks receive new revisions, so stale editors are rejected.
+
+- `trash list` returns one item per deletion with the deleted task, the subtasks deleted with it, `deleted_at`, `deleted_by`, and whether it can be restored. `board.snapshot` and JSON/Markdown exports include the same items; the widget snapshot does not.
+- `trash restore <task-id>` restores that deletion with its subtasks. A subtask deleted with its parent is restored through the parent (`INVALID_STATE`). A task whose parent is still in the trash waits for the parent (`INVALID_STATE`).
+- `trash delete <task-id>` deletes that entry permanently, including subtasks that were moved to the trash earlier on their own.
+- `trash empty` deletes everything in the trash permanently.
+
+Permanent deletion removes tasks, runs, artifact links, and checklist/review/dependency references, and keeps them in the `task.purged` or `trash.emptied` event. Surviving dependents lose the removed prerequisite and receive new revisions. Inbox source/note/processed state are preserved; only the deleted task link is cleared. Reconversion does not recreate deleted work automatically. Revision tombstones never regress across restore/retry. Nothing leaves the trash automatically.
+
+`project delete` stays permanent. Without `--with-tasks`, live or trashed tasks produce `HAS_TASKS`; with it, both are deleted permanently. Projects have no revision and reject `--expected-revision`.
+
+Plugins are restricted to approved task reads/mutations. Deletion, the trash, restore, and widget configuration are refused even if declared in a manifest. Validate all response operations before applying any.
 
 ## Dependencies and reviews
 
-Incomplete prerequisite IDs appear in `blocked_by`. A task is `ready` when its status is To do and it has neither incomplete prerequisites nor an explicit blocking reason. Reject dependency cycles. Check prerequisites for start/completion, including `task update --status`.
+IDs of prerequisites that are neither Done nor Canceled appear in `blocked_by`. A task is `ready` when its status is Todo and it has neither open prerequisites nor an explicit blocking reason. Reject dependency cycles. Check prerequisites for start/completion, including `task update --status`.
 
 ```sh
 workboard task dependency add TASK_ID --on PREREQUISITE_ID --expected-revision 1 --request-id link-1 --json
@@ -64,7 +90,7 @@ workboard task checklist update TASK_ID ITEM_ID --text 'Regression check' --requ
 workboard task checklist remove TASK_ID ITEM_ID --expected-revision 8 --json
 ```
 
-Tasks in Review accept approval, requested changes, or rejection. Approval checks requirements/dependencies and completes the task. Requested changes return it to To do and record the summary as next action. Rejection returns it to To do with a blocking reason; clear that reason with `task update --blocked-reason ''` once resolved. `task show` includes `review_decisions`.
+Tasks in Review accept approval, requested changes, or rejection. Approval checks requirements/dependencies and completes the task. Requested changes return it to Todo and record the summary as next action. Rejection returns it to Todo with a blocking reason; clear that reason with `task update --blocked-reason ''` once resolved. `task show` includes `review_decisions`.
 
 ```sh
 workboard task decide TASK_ID --decision approve --summary 'Completion criteria verified' --expected-revision 9 --json

@@ -21,6 +21,7 @@ import Darwin
         try await rpcArgumentsAndErrors()
         if let executable = ProcessInfo.processInfo.environment["WORKBOARD_BIN"], !executable.isEmpty {
             try await actualService(executable)
+            try await linearWorkflowAndDeletion(executable)
             try await connectionSwitchRecoveryAndPluginConfig(executable)
         }
         print("✓ SwiftUI models, theme persistence and validation, RPC arguments, and error handling verified")
@@ -299,6 +300,75 @@ import Darwin
         let reloaded = BoardStore(appearance: appearance); await reloaded.reload(force: true)
         try require(reloaded.tasks.count == 3 + foreignSchedules.count, "Tasks did not persist")
         print("✓ Actual Rust service: projects, parent/subtasks, deadlines/meetings, today’s schedule, runs, history, attachments, completion, and reload verified")
+    }
+    @MainActor static func linearWorkflowAndDeletion(_ executable: String) async throws {
+        let directory = URL(fileURLWithPath: "/tmp/wbdel-\(UUID().uuidString.prefix(8))")
+        let suite = "workboard-deletion-tests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { throw Failure(description: "No test defaults") }
+        let service = try await startService(executable, directory: directory)
+        defer { if service.isRunning { service.terminate() }; service.waitUntilExit(); defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let appearance = AppearanceSettings(defaults: defaults); appearance.executablePath = executable; appearance.dataDirectory = directory.path
+        let store = BoardStore(appearance: appearance)
+        await store.reload(force: true)
+        _ = await store.createProject(name: "Linear workflow", directory: directory.path)
+        guard let project = store.projects.first else { throw Failure(description: "No project: \(store.actionError ?? "")") }
+        store.newTask(status: .backlog)
+        guard var parked = store.draft else { throw Failure(description: "Backlog column did not open a draft") }
+        try require(parked.status == .backlog, "Backlog draft started in \(parked.status)")
+        parked.title = "Parked idea"; _ = await store.save(parked)
+        guard let idea = store.tasks.first(where: { $0.title == "Parked idea" }) else { throw Failure(description: "Backlog task missing: \(store.actionError ?? "")") }
+        try require(idea.status == .backlog && !idea.ready, "Backlog task was \(idea.status), ready \(idea.ready)")
+        store.newTask(status: .review)
+        try require(store.draft?.status == .todo, "A review column draft did not fall back to Todo")
+        store.draft = nil
+        await store.move(idea, to: .canceled)
+        guard let canceled = store.tasks.first(where: { $0.id == idea.id }), canceled.status == .canceled else { throw Failure(description: "Cancel failed: \(store.actionError ?? "")") }
+        try require(!canceled.isOverdue, "Canceled task reported as overdue")
+        await store.move(canceled, to: .inProgress)
+        try require(store.tasks.first(where: { $0.id == idea.id })?.status == .inProgress, "Canceled task did not reopen and start: \(store.actionError ?? "")")
+        var parent = TaskDraft(projectID: project.id); parent.title = "Parent with subtasks"; _ = await store.save(parent)
+        guard let root = store.tasks.first(where: { $0.title == parent.title }) else { throw Failure(description: "Parent missing") }
+        var child = TaskDraft(projectID: project.id, parentID: root.id); child.title = "Child"; _ = await store.save(child)
+        guard let firstChild = store.children(of: root).first else { throw Failure(description: "Child missing") }
+        var grandchild = TaskDraft(projectID: project.id, parentID: firstChild.id); grandchild.title = "Grandchild"; _ = await store.save(grandchild)
+        try require(store.descendants(of: root).count == 2, "Descendants should include the grandchild")
+        await store.openTask(root.id)
+        guard let stale = store.tasks.first(where: { $0.id == root.id }) else { throw Failure(description: "Root missing") }
+        var renamed = TaskDraft(projectID: project.id, editingTask: stale); renamed.title = "Renamed elsewhere"; _ = await store.save(renamed)
+        let refused = await store.delete(stale)
+        try require(!refused && store.tasks.contains(where: { $0.id == root.id }) && store.actionError != nil, "A stale delete was not refused")
+        store.actionError = nil
+        guard let current = store.tasks.first(where: { $0.id == root.id }) else { throw Failure(description: "Root disappeared after refusal") }
+        store.requestDelete(current)
+        try require(store.deletionTask?.id == root.id, "Delete confirmation was not requested")
+        let deleted = await store.delete(current)
+        try require(deleted && store.notice == "Task and 2 subtasks moved to Trash.", "Delete failed: \(store.actionError ?? store.notice ?? "")")
+        try require(!store.tasks.contains(where: { [root.id, firstChild.id].contains($0.id) }) && store.tasks.count == 1, "Deleted tasks remain on the board")
+        try require(store.selectedTaskID == nil && store.detail == nil, "Details of the deleted task stayed open")
+        try require(store.trash.count == 1 && store.trash.first?.subtaskCount == 2 && store.trashedTaskCount == 3, "Trash did not list the deletion")
+        try require(store.undoDeletion == UndoDeletion(notice: "Task and 2 subtasks moved to Trash.", taskID: root.id), "Undo was not offered")
+        guard let undo = store.undoDeletion else { throw Failure(description: "No undo") }
+        let undone = await store.restore(undo.taskID)
+        try require(undone && store.undoDeletion == nil, "Undo failed: \(store.actionError ?? "")")
+        try require(store.trash.isEmpty && store.descendants(of: store.tasks.first { $0.id == root.id }!).count == 2 && store.notice == "Task and 2 subtasks restored.", "Undo did not restore the subtree")
+        guard let back = store.tasks.first(where: { $0.id == root.id }), let backChild = store.children(of: back).first else { throw Failure(description: "Restored tasks missing") }
+        _ = await store.delete(backChild)
+        _ = await store.delete(back)
+        try require(store.trash.count == 2, "Separate deletions did not stay separate")
+        guard let parentItem = store.trash.first(where: { $0.task.id == root.id }), let childItem = store.trash.first(where: { $0.task.id == backChild.id }) else { throw Failure(description: "Trash items missing") }
+        try require(!childItem.restorable && childItem.parentInTrash == "Renamed elsewhere", "A subtask whose parent is in the trash looked restorable")
+        try require(store.purgeCount(parentItem) == 3, "Purge count \(store.purgeCount(parentItem)) did not include the earlier subtask deletion")
+        let purged = await store.purge(parentItem)
+        try require(purged && store.trash.isEmpty && store.notice == "Deleted permanently.", "Purge failed: \(store.actionError ?? "")")
+        guard let remaining = store.tasks.first else { throw Failure(description: "No remaining task") }
+        _ = await store.delete(remaining)
+        store.selectedProjectID = BoardStore.trashScope
+        try require(store.isTrashView && store.trashedTaskCount == 1, "Trash scope missing")
+        await store.reload(force: true)
+        try require(store.selectedProjectID == BoardStore.trashScope, "Reload left the Trash view")
+        let emptied = await store.emptyTrash()
+        try require(emptied && store.trash.isEmpty && store.tasks.isEmpty, "Empty Trash failed: \(store.actionError ?? "")")
+        print("✓ Actual service: Backlog column drafts, cancel and reopen, stale delete refusal, Trash with undo, restore, permanent delete, and Empty Trash")
     }
     @MainActor static func startService(_ executable: String, directory: URL) async throws -> Process {
         let service = Process(); service.executableURL = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("workboard-service")

@@ -299,6 +299,11 @@ pub enum TemplateCommand {
         parent: Option<String>,
         #[arg(long)]
         title: Option<String>,
+        #[arg(
+            long,
+            help = "Status of every created task: backlog or todo. Defaults to todo"
+        )]
+        status: Option<String>,
     },
 }
 
@@ -339,6 +344,7 @@ impl TemplateCommand {
                 project,
                 parent,
                 title,
+                status,
             } => {
                 let mut p = json!({"template_id":template_id,"project_id":project});
                 if let Some(v) = parent {
@@ -346,6 +352,9 @@ impl TemplateCommand {
                 }
                 if let Some(v) = title {
                     p["title"] = json!(v);
+                }
+                if let Some(v) = status {
+                    p["status"] = json!(v);
                 }
                 ("template.apply", p)
             }
@@ -376,6 +385,11 @@ pub enum InboxCommand {
         parent: Option<String>,
         #[arg(long)]
         title: Option<String>,
+        #[arg(
+            long,
+            help = "Status of the new task: backlog or todo. Defaults to todo"
+        )]
+        status: Option<String>,
     },
     Dismiss {
         item_id: String,
@@ -411,6 +425,7 @@ impl InboxCommand {
                 project,
                 parent,
                 title,
+                status,
             } => {
                 let mut p = json!({"item_id":item_id,"project_id":project});
                 if let Some(v) = parent {
@@ -418,6 +433,9 @@ impl InboxCommand {
                 }
                 if let Some(v) = title {
                     p["title"] = json!(v);
+                }
+                if let Some(v) = status {
+                    p["status"] = json!(v);
                 }
                 ("inbox.promote", p)
             }

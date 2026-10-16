@@ -3,7 +3,7 @@
 # validates claims, revisions, and retries. Destructive, broad, or user-only commands ask first.
 # The installer appends the same rules for the absolute paths of the installed executable.
 prefix_rule(
-    pattern = ["workboard", ["project", "task", "inbox", "template", "view", "board", "events", "doctor", "agent"]],
+    pattern = ["workboard", ["project", "task", "inbox", "template", "view", "board", "events", "doctor", "agent", "trash"]],
     decision = "allow",
     justification = "Board reads and task updates go through the board service.",
     match = [["workboard", "task", "show", "TASK", "--json"], ["workboard", "agent", "context"]],
@@ -12,6 +12,11 @@ prefix_rule(
     pattern = ["workboard", "task", ["delete", "complete", "decide"]],
     decision = "prompt",
     justification = "Deleting work, completing tasks, and deciding reviews belong to the user.",
+)
+prefix_rule(
+    pattern = ["workboard", "trash", ["restore", "delete", "empty"]],
+    decision = "prompt",
+    justification = "Restoring deleted work and emptying the trash belong to the user.",
 )
 prefix_rule(
     pattern = ["workboard", ["project", "template", "view"], "delete"],

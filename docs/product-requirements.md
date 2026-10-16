@@ -36,7 +36,7 @@ Disabling or removing a plugin preserves tasks, subtasks, artifacts, evidence pa
 
 ## Main screens
 
-Default columns are `To do → In progress → Review → Done`. Show blocking reasons with next actions. A separate Blocked column remains a UI decision.
+Default columns follow Linear's workflow: `Backlog → Todo → In Progress → In Review → Done`, plus `Canceled`. Backlog holds work that is not planned yet, and agents' ready lists skip it. Deleted tasks go to a Trash where users restore them or delete them permanently. Show blocking reasons with next actions. A separate Blocked column remains a UI decision.
 
 Task details show the goal, completion criteria, assignee, current run, next action, artifacts, evidence, and change history. Show agent implementation details only when they help the user assess work.
 

@@ -1213,7 +1213,7 @@ fn only_shared_group_snapshot_writes_request_a_widget_reload() {
 }
 
 #[test]
-fn deleting_a_task_removes_its_runs_and_artifacts_but_keeps_history_and_revision() {
+fn deleting_moves_a_task_to_the_trash_and_purging_removes_its_runs_and_artifacts() {
     let (dir, mut b, p, t) = setup();
     let started = call(&mut b, "task.start", json!({"task_id":t,"agent_id":"a"}));
     call(
@@ -1248,6 +1248,59 @@ fn deleting_a_task_removes_its_runs_and_artifacts_but_keeps_history_and_revision
             .code,
         "NOT_FOUND"
     );
+    let count = |b: &Board, table: &str| -> i64 {
+        b.conn
+            .query_row(
+                &format!("SELECT count(*) FROM {table} WHERE task_id=?1"),
+                [&t],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(
+        (count(&b, "runs"), count(&b, "artifacts")),
+        (1, 1),
+        "the trash keeps runs and artifacts"
+    );
+    let trash = call(&mut b, "trash.list", json!({}))["items"].clone();
+    assert_eq!(trash.as_array().unwrap().len(), 1);
+    assert_eq!(trash[0]["task"]["title"], "Build the kanban board");
+    assert_eq!(trash[0]["deleted_by"], "a");
+    assert_eq!(trash[0]["restorable"], true);
+    let runs: String = b
+        .conn
+        .query_row("SELECT status FROM runs WHERE task_id=?1", [&t], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(runs, "interrupted", "deleting ends the running run");
+    assert!(
+        call(&mut b, "task.list", json!({"query":"Kanban"}))["tasks"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let widget: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("widget-snapshot.json")).unwrap())
+            .unwrap();
+    assert!(widget["tasks"].as_array().unwrap().is_empty());
+    assert!(
+        widget.get("trash").is_none(),
+        "the widget never sees the trash"
+    );
+    let purge = req("trash.purge", json!({"task_id":t}));
+    let purged = b.dispatch(purge.clone());
+    assert!(purged.ok, "{purged:?}");
+    assert_eq!(
+        b.dispatch(purge).result,
+        purged.result,
+        "retry returns the same result"
+    );
+    assert_eq!(purged.result.as_ref().unwrap()["trash_count"], 0);
+    assert!(call(&mut b, "trash.list", json!({}))["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
     for table in ["runs", "artifacts"] {
         let count: i64 = b
             .conn
@@ -1279,8 +1332,8 @@ fn deleting_a_task_removes_its_runs_and_artifacts_but_keeps_history_and_revision
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["kind"] == "task.deleted" && e["task_id"] == t)
-        .expect("deletion event");
+        .find(|e| e["kind"] == "task.purged" && e["task_id"] == t)
+        .expect("permanent deletion event");
     // History keeps what was attached even though the rows are gone.
     assert_eq!(
         deletion["data"]["removed"]["artifacts"][0]["path"],

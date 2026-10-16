@@ -239,7 +239,7 @@ class SlackPlugin(unittest.TestCase):
         self.assertEqual(request.full_url, "https://slack.com/api/chat.postMessage")
         body = json.loads(request.data)
         self.assertEqual(body["blocks"][0]["text"]["type"], "plain_text")
-        self.assertIn("Status: Review", body["blocks"][0]["text"]["text"])
+        self.assertIn("Status: In Review", body["blocks"][0]["text"]["text"])
         self.assertNotIn("<@U123>", body["text"])
         self.assertFalse(body["unfurl_links"])
         self.assertFalse(body["unfurl_media"])

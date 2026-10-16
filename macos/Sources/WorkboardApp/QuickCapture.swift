@@ -209,7 +209,8 @@ struct InboxView: View {
                                         .accessibilityIdentifier("inbox-promote-\(item.id)")
                                     Button("Archive") { dismiss(item) }.disabled(store.isMutating)
                                 } else if let taskID = item.taskID {
-                                    Button("Open task") { Task { await store.openTask(taskID) } }
+                                    if store.tasks.contains(where: { $0.id == taskID }) { Button("Open task") { Task { await store.openTask(taskID) } } }
+                                    else { Text("Task in Trash").font(.caption).foregroundStyle(.secondary) }
                                 } else { Text("Archived").font(.caption).foregroundStyle(.secondary) }
                             }.padding(16).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
                         }

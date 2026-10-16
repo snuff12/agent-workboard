@@ -12,7 +12,7 @@ use std::time::Duration;
 pub const PROTOCOL: &str = include_str!("../../../integrations/agents/protocol.md");
 
 /// Requests that act for an agent. The CLI adds the session's agent ID when none is given.
-pub const IDENTIFIED_METHODS: [&str; 13] = [
+pub const IDENTIFIED_METHODS: [&str; 16] = [
     "task.claim",
     "task.start",
     "task.review",
@@ -23,6 +23,9 @@ pub const IDENTIFIED_METHODS: [&str; 13] = [
     "task.update",
     "task.attach",
     "task.delete",
+    "trash.restore",
+    "trash.purge",
+    "trash.empty",
     "project.delete",
     "run.update",
     "run.finish",
@@ -219,7 +222,12 @@ pub fn context(
     }
     let mine: Vec<String> = tasks
         .iter()
-        .filter(|t| agent.is_some() && t["assignee"].as_str() == agent && t["status"] != "done")
+        .filter(|t| {
+            agent.is_some()
+                && t["assignee"].as_str() == agent
+                && t["status"] != "done"
+                && t["status"] != "canceled"
+        })
         .map(|t| line(t, t["next_action"].as_str().unwrap_or("")))
         .collect();
     section(&mut out, "Your tasks", mine, 5);

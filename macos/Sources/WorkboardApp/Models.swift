@@ -37,12 +37,17 @@ extension JSONEncoder {
     static var pretty: JSONEncoder { let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]; return encoder }
 }
 
+/// Board columns in Linear's default workflow order.
 enum WorkStatus: String, CaseIterable, Codable, Identifiable, Sendable {
-    case todo, inProgress = "in_progress", review, done
+    case backlog, todo, inProgress = "in_progress", review, done, canceled
     var id: String { rawValue }
-    var title: String { switch self { case .todo: "To do"; case .inProgress: "In progress"; case .review: "Review"; case .done: "Done" } }
-    var symbol: String { switch self { case .todo: "circle.dashed"; case .inProgress: "circle.lefthalf.filled"; case .review: "eye"; case .done: "checkmark.circle.fill" } }
-    var color: Color { switch self { case .todo: .secondary; case .inProgress: .blue; case .review: .orange; case .done: .green } }
+    var title: String { switch self { case .backlog: "Backlog"; case .todo: "Todo"; case .inProgress: "In Progress"; case .review: "In Review"; case .done: "Done"; case .canceled: "Canceled" } }
+    var symbol: String { switch self { case .backlog: "circle.dashed"; case .todo: "circle"; case .inProgress: "circle.lefthalf.filled"; case .review: "eye"; case .done: "checkmark.circle.fill"; case .canceled: "xmark.circle.fill" } }
+    var color: Color { switch self { case .backlog, .todo, .canceled: .secondary; case .inProgress: .blue; case .review: .orange; case .done: .green } }
+    /// Done and Canceled close a task: it no longer counts as open work or blocks dependents.
+    var isClosed: Bool { self == .done || self == .canceled }
+    /// New tasks start here. Later columns follow runs, reviews, and recorded outcomes.
+    var acceptsNewTasks: Bool { self == .backlog || self == .todo }
 }
 
 struct BoardProject: Identifiable, Sendable, Hashable {
@@ -110,7 +115,7 @@ struct BoardTask: Identifiable, Sendable, Hashable {
         return start < tomorrow && (endDate ?? start) > today
     }
     var isOverdue: Bool {
-        guard status != .done, let dueDate else { return false }
+        guard !status.isClosed, let dueDate else { return false }
         if dueAt?.count == 10 { return dueDate < Calendar.current.startOfDay(for: Date()) }
         return dueDate < Date()
     }
@@ -187,6 +192,32 @@ struct TaskDetail: Sendable {
     }
 }
 
+/// One deletion waiting in the trash: the task the user deleted and the subtasks deleted with it.
+struct TrashItem: Identifiable, Sendable {
+    let id: String
+    let task: BoardTask
+    let tasks: [BoardTask]
+    let deletedAt: String
+    let deletedBy: String?
+    let subtaskCount: Int
+    let restorable: Bool
+    let parentInTrash: String?
+    init?(_ json: JSONValue) {
+        guard let task = BoardTask(json["task"]) else { return nil }
+        self.task = task; id = json["deletion_id"].string ?? task.id
+        let tasks = json["tasks"].array.compactMap(BoardTask.init); self.tasks = tasks.isEmpty ? [task] : tasks
+        deletedAt = json["deleted_at"].string ?? ""; deletedBy = json["deleted_by"].string
+        subtaskCount = json["subtask_count"].int ?? max(self.tasks.count - 1, 0)
+        restorable = json["restorable"].bool ?? true; parentInTrash = json["parent_in_trash"]["title"].string
+    }
+}
+
+/// The notice after a deletion offers Undo while that notice is showing.
+struct UndoDeletion: Equatable {
+    let notice: String
+    let taskID: String
+}
+
 struct TaskDraft: Identifiable {
     let id = UUID()
     var projectID: String
@@ -197,6 +228,7 @@ struct TaskDraft: Identifiable {
     var nextAction = ""
     var blockedReason = ""
     var priority = 1
+    var status = WorkStatus.todo
     var hasDueDate = false
     var dueDate = Date()
     var dueIncludesTime = false

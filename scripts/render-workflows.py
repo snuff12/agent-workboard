@@ -15,7 +15,8 @@ SERVICE = ROOT / "target/debug/workboard-service"
 
 def main():
     environment = dict(os.environ)
-    for key in ("WORKBOARD_DATA_DIR", "WORKBOARD_SOCKET", "WORKBOARD_WIDGET_SNAPSHOT"):
+    # An agent session's identity would make the CLI act as that agent on the fixture tasks.
+    for key in ("WORKBOARD_DATA_DIR", "WORKBOARD_SOCKET", "WORKBOARD_WIDGET_SNAPSHOT", "WORKBOARD_AGENT", "CODEX_THREAD_ID"):
         environment.pop(key, None)
     with tempfile.TemporaryDirectory(prefix="awb-pixels-", dir="/tmp") as temporary:
         data = Path(temporary) / "data"
@@ -74,6 +75,11 @@ def main():
             task("Edit content copy", scheduled_start=today.date().isoformat(),
                  scheduled_end=(today + datetime.timedelta(days=1)).date().isoformat(), time_zone="Asia/Seoul")
             task("Write the release checklist", goal="Document logging, backup, and rollback procedures")
+            task("Localize the homepage", goal="Plan after the first release", status="backlog")
+            dropped = task("Animate the hero banner", goal="Dropped in favor of a static layout")
+            rpc("task.update", task_id=dropped["id"], expected_revision=dropped["revision"], status="canceled")
+            for title in ("Draft the old hero copy", "Compare carousel libraries"):
+                rpc("task.delete", task_id=task(title, goal="Replaced by the new layout")["id"])
             rpc("inbox.capture", title="Customer feedback on search improvements", source="https://example.com/feedback",
                 note="Turn this into a search task at the next planning session")
             rpc("inbox.capture", title="Feedback that mobile buttons are too small", note="Review the screen recording before creating a task")
