@@ -8,33 +8,36 @@ The optional plugin requires Orca app/CLI and Python 3. The core contains neithe
 
 ```sh
 scripts/package-plugins.sh
-unzip dist/AgentWorkboard-plugin-orca-0.1.0.zip -d /tmp/workboard-orca
-workboard plugin install /tmp/workboard-orca/orca-0.1.0
+unzip dist/AgentWorkboard-plugin-orca-0.2.0.zip -d /tmp/workboard-orca
+workboard plugin install /tmp/workboard-orca/orca-0.2.0
 workboard plugin enable orca --executable /path/to/orca \
-  --config '{"repo":"path:/path/to/registered-repo"}'
+  --config '{"repos":["path:/path/to/first-repo","path:/path/to/second-repo"]}'
 workboard plugin check orca --json
 ```
 
-Replace the executable with an absolute Orca CLI path. `repo` accepts registered `id:…`, `path:…`, or `name:…` selectors. No automatic executable discovery. Only local repositories/worktrees on this Mac are supported; remote environments and Orca orchestration Run task synchronization are not.
+Replace the executable with an absolute Orca CLI path. No automatic executable discovery. `repos` lists the connected Orca repositories, at most 50, as `id:…`, `path:…`, or `name:…` selectors. The plugin resolves them with one `orca repo list` call: `path:` matches the repository folder after resolving symbolic links, and a `name:` that matches several repositories connects none of them. The earlier single `repo` setting still works and counts as one more entry. `check` returns the connected `repos` and the `unmatched` selectors with a reason; it fails only when no selector matches. Every other method works only with worktrees of connected repositories. Only local repositories/worktrees on this Mac are supported; remote environments and Orca orchestration Run task synchronization are not.
 
-In **Settings → Plugins → Install**, select the extracted directory. **Configure and enable** accepts executable/repository. Choose **Use** and a worktree:
+To work by board project, connect the repository at each project's folder. In the app, **Configure and enable** fills in `path:` entries for the board project folders when no repository is set, and **Add board project folders** adds them later.
+
+In **Settings → Plugins → Install**, select the extracted directory. **Configure and enable** accepts the executable and repositories. Choose **Use** and a worktree:
 
 | Feature | Behavior |
 | --- | --- |
-| Browse | Show worktrees, branches, and workspace status; separately load run terminals and connection state. |
-| Import | Create a task in the selected project, or a subtask of the selected board task. |
+| Browse | Show worktrees of all connected repositories grouped by repository, or of one chosen repository, with branches and workspace status; separately load run terminals and connection state. Selectors not found in Orca are listed. |
+| Import | Create a task in the selected project, or a subtask of the selected board task. Selecting a worktree preselects the board project whose folder is its repository. |
 | Attach | Save worktree path, source ID/instance, branch, commit, and verification time. |
-| Launch | Run the selected task with Codex/Claude and optional extra instructions. Agent installation/authentication follows that CLI's settings. |
+| Launch | Run the selected task with Codex/Claude and optional extra instructions. A note appears when the worktree is not in the folder of the task's project. Agent installation/authentication follows that CLI's settings. |
 | Output | Explicit **Read output** reads up to 200 lines. Lists omit terminal previews and draft input. |
 
 Imports start in To do. Orca `done` and terminal exit do not complete board work. Do not overwrite existing goals, assignees, or criteria from external status. Observations are point-in-time, not automatic sync.
 
 ## CLI workflow
 
-Replace uppercase IDs with actual values. `WORKTREE_ID` is the complete `id` from `worktrees.list`.
+Replace uppercase IDs with actual values. `WORKTREE_ID` is the complete `id` from `worktrees.list`. Each worktree includes `repo_id`, `repo_name`, and `repo_path`.
 
 ```sh
 workboard plugin run orca worktrees.list --json
+workboard plugin run orca worktrees.list --params '{"repo_id":"ORCA_REPO_ID"}' --json
 workboard plugin run orca worktrees.get --params '{"worktree_id":"WORKTREE_ID"}' --json
 workboard plugin run orca worktrees.import --request-id IMPORT_REQUEST_ID \
   --params '{"worktree_id":"WORKTREE_ID","project_id":"BOARD_PROJECT_ID","parent_id":"PARENT_TASK_ID"}' --json
@@ -79,7 +82,7 @@ The agent receives goals, criteria, next action, board CLI/data/socket paths, an
 Default agent commands are `codex` and `claude`. Override paths/options through `agent_commands`; array elements are literal arguments and the prompt is appended last. Shell pipelines/command strings are not accepted.
 
 ```json
-{"executable":"/path/to/orca","repo":"id:ORCA_REPO_ID","agent_commands":{"codex":["/path/to/codex"],"claude":["/path/to/claude"]}}
+{"executable":"/path/to/orca","repos":["id:ORCA_REPO_ID"],"agent_commands":{"codex":["/path/to/codex"],"claude":["/path/to/claude"]}}
 ```
 
 ## Failures and retries
@@ -94,6 +97,6 @@ Disabling/removing stops later calls and preserves tasks/subtasks/runs/links. Al
 
 ## Verification
 
-`python3 tests/test_orca_plugin.py` combines fake Orca executables with a real board service to verify scope, provenance, subtasks, request retries, claims/revisions, concurrent launch deduplication, uncertain outcomes, timeouts, and preservation after disable/remove.
+`python3 tests/test_orca_plugin.py` combines fake Orca executables with a real board service to verify repository scope across several connected repositories, unmatched and ambiguous selectors, the earlier single-repository setting, provenance, subtasks, request retries, claims/revisions, concurrent launch deduplication, uncertain outcomes, timeouts, and preservation after disable/remove.
 
 An installed Orca runtime was also checked with an isolated board: repository/worktree/terminal reads, import, a `/usr/bin/true` test terminal, retry, and run attachment. The created terminal was closed. This does not verify actual Codex/Claude authentication, paid model calls, or native app buttons.

@@ -169,12 +169,15 @@ import Darwin
         try require(!invalidBoolean.calendarEnabled && !invalidBoolean.gmailEnabled, "Non-Boolean plugin values enabled a service")
         let orcaSaved: JSONValue = .object(["executable": .string("/custom/orca"), "repo": .string("id:repo-1"), "agent_commands": .object(["codex": .array([.string("/custom/codex")])])])
         var orcaDraft = PluginConfigurationDraft(config: orcaSaved)
-        try require(orcaDraft.orcaRepo == "id:repo-1" && orcaDraft.executable == "/custom/orca", "Orca settings were not restored")
+        try require(orcaDraft.orcaRepoSelectors == ["id:repo-1"] && orcaDraft.executable == "/custom/orca", "Orca settings were not restored")
         let orcaUnchanged = try orcaDraft.enableParameters(for: "orca")["config"]
         try require(orcaUnchanged == orcaSaved, "Orca save lost custom agent command")
-        orcaDraft.orcaRepo = "path:/new/repo"
+        orcaDraft.orcaRepos = "id:repo-1\n  path:/new/repo  \n\npath:/new/repo"
+        orcaDraft.addOrcaRepos(for: [BoardProject(.object(["id": .string("p1"), "directory": .string("/board/app")]))!, BoardProject(.object(["id": .string("p2"), "directory": .string("")]))!])
         let orcaEdited = try orcaDraft.enableParameters(for: "orca")["config"]!
-        try require(orcaEdited["repo"].string == "path:/new/repo" && orcaEdited["agent_commands"] == orcaSaved["agent_commands"], "Orca scope edit lost saved options")
+        try require(orcaEdited["repos"] == .array([.string("id:repo-1"), .string("path:/new/repo"), .string("path:/board/app")]) && orcaEdited["repo"] == .null && orcaEdited["agent_commands"] == orcaSaved["agent_commands"], "Orca repository edit lost saved options or repositories")
+        orcaDraft.orcaRepos = "id:repo-1\n/no/prefix"
+        try require((try? orcaDraft.enableParameters(for: "orca")) == nil, "Orca accepted a repository without a selector prefix")
         let slackSaved: JSONValue = .object(["account": .string("work-slack"), "team_id": .string("T123"), "credentials_file": .string("/custom/slack.credentials.json"), "messages_enabled": .bool(true), "send_enabled": .bool(false), "future_option": .string("keep")])
         var slackDraft = PluginConfigurationDraft(config: slackSaved)
         try require(slackDraft.slackMessagesEnabled && !slackDraft.slackSendEnabled, "Slack sending was enabled without an explicit setting")
