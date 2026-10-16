@@ -12,9 +12,11 @@
 		18805D06D877A57D11F744ED /* WorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */; };
 		215B487D4151F345AE689BCF /* Transport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */; };
 		303A5E99B64CCAA663124CFC /* WorkboardWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E38EB964F346D621975A35F3 /* WorkboardWidgets.swift */; };
+		3413B5E6FFCEB1B5BBE19290 /* LinearView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19655479674A5A3A9ECC1781 /* LinearView.swift */; };
 		470BA772C986DFD934F50DFD /* Editors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 421323AFC436573C1D629553 /* Editors.swift */; };
 		65A13717F06569BA783E0CB9 /* BoardStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED151705C40449FE3BDEA29 /* BoardStore.swift */; };
 		6AA77E9E2F9DE7A835861145 /* WorkboardApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B094FB709613DE58EF7BE4A /* WorkboardApp.swift */; };
+		956BFB845328E2C328FA0B9B /* GitHubViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDBE013158EFE15F5B054725 /* GitHubViews.swift */; };
 		96C90BCDD27F591FF2DB1B46 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1F8F5F062D84CC40A97715D /* WidgetKit.framework */; };
 		A2F0327FF1DFD13E2A8FB0C9 /* AppGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CC040A659AF4AAA849F4151 /* AppGroup.swift */; };
 		A7FB31512596BC05E93C4FDC /* Appearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0171C8F0614A68C02905CF43 /* Appearance.swift */; };
@@ -66,6 +68,7 @@
 		0171C8F0614A68C02905CF43 /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
 		125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		1264FA2B4DE7D951AD317DE5 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		19655479674A5A3A9ECC1781 /* LinearView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearView.swift; sourceTree = "<group>"; };
 		21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowViews.swift; sourceTree = "<group>"; };
 		29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleWorkspaceView.swift; sourceTree = "<group>"; };
 		2CC040A659AF4AAA849F4151 /* AppGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroup.swift; sourceTree = "<group>"; };
@@ -82,6 +85,7 @@
 		A40B26BEED20581CED11E4C4 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		C1549B509B53C8C7ED05DDAD /* WorkflowModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkflowModels.swift; sourceTree = "<group>"; };
 		CC7DA5092DD6C83E8B7419BA /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
+		DDBE013158EFE15F5B054725 /* GitHubViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubViews.swift; sourceTree = "<group>"; };
 		DEE899CB83C91B978D8CB034 /* WorkboardWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WorkboardWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E2A38D866298D31F8D9E8BEA /* WorkboardAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkboardAppUITests.swift; sourceTree = "<group>"; };
 		E38EB964F346D621975A35F3 /* WorkboardWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkboardWidgets.swift; sourceTree = "<group>"; };
@@ -149,7 +153,9 @@
 				5ED151705C40449FE3BDEA29 /* BoardStore.swift */,
 				CC7DA5092DD6C83E8B7419BA /* BoardView.swift */,
 				421323AFC436573C1D629553 /* Editors.swift */,
+				DDBE013158EFE15F5B054725 /* GitHubViews.swift */,
 				29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */,
+				19655479674A5A3A9ECC1781 /* LinearView.swift */,
 				A40B26BEED20581CED11E4C4 /* Models.swift */,
 				64EC551A72385D030AC1F5DD /* PluginViews.swift */,
 				5A880F06D49FE999CED11D18 /* QuickCapture.swift */,
@@ -339,7 +345,9 @@
 				65A13717F06569BA783E0CB9 /* BoardStore.swift in Sources */,
 				E3588D43F9AAB74B867DBB4F /* BoardView.swift in Sources */,
 				470BA772C986DFD934F50DFD /* Editors.swift in Sources */,
+				956BFB845328E2C328FA0B9B /* GitHubViews.swift in Sources */,
 				0CDD513B0C90C5E6F57AB4C2 /* GoogleWorkspaceView.swift in Sources */,
+				3413B5E6FFCEB1B5BBE19290 /* LinearView.swift in Sources */,
 				F075C2F56334018CB932EC4C /* Models.swift in Sources */,
 				B157690AA518A29B9D00D36B /* PluginViews.swift in Sources */,
 				C38163687B4EF789D9F50A69 /* QuickCapture.swift in Sources */,

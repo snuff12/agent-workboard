@@ -21,13 +21,17 @@ struct InstalledPlugin: Identifiable {
 
 @MainActor final class PluginStore: ObservableObject {
     @Published var entries: [InstalledPlugin] = []
-    @Published var error: String?
+    @Published var error: String? { didSet { errorCode = nil; errorMessage = nil } }
+    /// The service code of the latest `error`: empty when no service response was read, nil when none was recorded.
+    @Published var errorCode: String?
+    /// The full message of the failure that set `errorCode`. Setting `error` clears both, so they always describe the same failure.
+    private(set) var errorMessage: String?
     @Published var notice: String?
     @Published var busy = false
     private let client = WorkboardClient() // Slow plugins never queue core board requests.
     func reload(configuration: ConnectionConfiguration) async {
         do { let result = try await client.call("plugin.list", configuration: configuration); entries = result["plugins"].array.compactMap(InstalledPlugin.init); error = nil }
-        catch { self.error = error.localizedDescription }
+        catch { record(error) }
     }
     func call(_ method: String, params: [String: JSONValue], configuration: ConnectionConfiguration, requestID: String? = nil, isCurrent: () -> Bool = { true }) async -> JSONValue? {
         guard !busy, isCurrent() else { return nil }
@@ -36,13 +40,17 @@ struct InstalledPlugin: Identifiable {
             let result = try await client.call(method, params: params, configuration: configuration, timeoutSeconds: 195, requestID: requestID)
             return isCurrent() ? result : nil
         }
-        catch { if isCurrent() { self.error = error.localizedDescription }; return nil }
+        catch { if isCurrent() { record(error) }; return nil }
     }
     func run(_ plugin: InstalledPlugin, method: String, params: [String: JSONValue] = [:], configuration: ConnectionConfiguration, requestID: String? = nil, isCurrent: () -> Bool = { true }) async -> JSONValue? {
         guard isCurrent() else { return nil }
-        guard plugin.enabled else { error = "Enable the plugin first."; return nil }
+        guard plugin.enabled else { record(WorkboardError(message: "Enable the plugin first.", code: "PLUGIN_DISABLED")); return nil }
         let response = await call("plugin.run", params: ["id": .string(plugin.id), "method": .string(method), "params": .object(params)], configuration: configuration, requestID: requestID, isCurrent: isCurrent)
         return response?["result"]
+    }
+    private func record(_ failure: Error) {
+        let message = failure.localizedDescription
+        error = message; errorCode = (failure as? WorkboardError)?.code ?? ""; errorMessage = message
     }
 }
 
@@ -59,12 +67,12 @@ struct PluginSettingsView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if plugins.entries.isEmpty {
-                        VStack(spacing: 12) { Image(systemName: "puzzlepiece.extension").font(.system(size: 32, weight: .ultraLight)).foregroundStyle(.tertiary); Text("No plugins installed").font(.callout.weight(.medium)); Text("Choose an agent-memory, Google Workspace, Slack, or Orca package directory to install it. Core task management works without plugins.").font(.caption).foregroundStyle(Color.secondary).multilineTextAlignment(.center) }.padding(35).frame(maxWidth: .infinity)
+                        VStack(spacing: 12) { Image(systemName: "puzzlepiece.extension").font(.system(size: 32, weight: .ultraLight)).foregroundStyle(.tertiary); Text("No plugins installed").font(.callout.weight(.medium)); Text("Choose an agent-memory, Google Workspace, Slack, Linear, Orca, or GitHub package directory to install it. Core task management works without plugins.").font(.caption).foregroundStyle(Color.secondary).multilineTextAlignment(.center) }.padding(35).frame(maxWidth: .infinity)
                     }
                     ForEach(plugins.entries) { plugin in
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(spacing: 10) {
-                                Image(systemName: plugin.id == "google-workspace" ? "calendar" : plugin.id == "slack" ? "bubble.left.and.bubble.right" : plugin.id == "gmail" ? "envelope" : plugin.id == "agent-memory" ? "books.vertical" : plugin.id == "orca" ? "terminal" : "puzzlepiece.extension").font(.system(size: 20)).foregroundStyle(appearance.accent).frame(width: 30)
+                                Image(systemName: plugin.id == "google-workspace" ? "calendar" : plugin.id == "slack" ? "bubble.left.and.bubble.right" : plugin.id == "linear" ? "checklist" : plugin.id == "gmail" ? "envelope" : plugin.id == "agent-memory" ? "books.vertical" : plugin.id == "orca" ? "terminal" : plugin.id == "github" ? "chevron.left.forwardslash.chevron.right" : "puzzlepiece.extension").font(.system(size: 20)).foregroundStyle(appearance.accent).frame(width: 30)
                                 VStack(alignment: .leading, spacing: 3) { HStack { Text(plugin.name).font(.callout.weight(.semibold)); Text(plugin.version).font(.caption2).foregroundStyle(.tertiary) }; Text(plugin.enabled ? "Enabled" : "Disabled").font(.caption2).foregroundStyle(plugin.enabled ? .green : .secondary) }
                                 Spacer()
                                 if plugin.enabled { Button("Use…") { using = plugin }.disabled(plugins.busy) }
@@ -111,7 +119,24 @@ struct PluginConfigurationDraft {
     var slackMessagesEnabled: Bool
     var slackSendEnabled: Bool
     var slackTeamID: String
+    var linearWorkspace: String
+    var linearIssuesEnabled: Bool
+    var linearCommentsEnabled: Bool
+    var linearStateChangesEnabled: Bool
+    var githubAuth: String
+    var githubExecutable: String
+    var githubRepos: String
+    private let savedGitHubRepos: [String]
+    var githubWriteEnabled: Bool
     var advancedJSON: String
+    /// Configuration keys that must never hold a GitHub token; saving writes them as null.
+    static let githubSecretKeys: Set<String> = ["token", "access_token", "github_token", "gh_token", "pat", "password", "secret", "authorization"]
+    /// The Keychain account label for a GitHub token: ASCII `[A-Za-z0-9._@-]`, 1 to 80 characters.
+    static func isValidGitHubAccount(_ value: String) -> Bool {
+        (1...80).contains(value.unicodeScalars.count) && value.unicodeScalars.allSatisfy { scalar in
+            ("a"..."z").contains(scalar) || ("A"..."Z").contains(scalar) || ("0"..."9").contains(scalar) || "._@-".unicodeScalars.contains(scalar)
+        }
+    }
 
     init(config: JSONValue, defaultsForNewInstall: Bool = false) {
         original = config.object
@@ -127,6 +152,15 @@ struct PluginConfigurationDraft {
         slackMessagesEnabled = config["messages_enabled"].bool ?? false
         slackSendEnabled = config["send_enabled"].bool ?? false
         slackTeamID = config["team_id"].string ?? ""
+        linearWorkspace = config["workspace"].string ?? ""
+        linearIssuesEnabled = config["issues_enabled"].bool ?? false
+        linearCommentsEnabled = config["comments_enabled"].bool ?? false
+        linearStateChangesEnabled = config["state_changes_enabled"].bool ?? false
+        githubAuth = config["auth"].string ?? "gh"
+        githubExecutable = config["gh_executable"].string ?? ""
+        savedGitHubRepos = config["repos"].array.compactMap(\.string)
+        githubRepos = savedGitHubRepos.joined(separator: "\n")
+        githubWriteEnabled = config["write_enabled"].bool ?? false
         advancedJSON = config.pretty
     }
     /// One Orca repository selector per line, such as `path:/folder`, `id:…`, or `name:…`.
@@ -143,6 +177,18 @@ struct PluginConfigurationDraft {
         var selectors = orcaRepoSelectors
         for project in projects where project.directory.hasPrefix("/") && !selectors.contains("path:" + project.directory) { selectors.append("path:" + project.directory) }
         orcaRepos = selectors.joined(separator: "\n")
+    }
+    /// One `owner/name` per line; duplicates collapse ASCII case-insensitively.
+    var githubRepoList: [String] {
+        GitHubRepoName.unique(githubRepos.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+    }
+    /// Adds the GitHub repository of each board project folder's Git remote.
+    mutating func addGitHubRepos(for projects: [BoardProject]) {
+        var repos = githubRepoList
+        for project in projects {
+            if let repo = GitHubRemote.repository(in: project.directory), !repos.contains(where: { $0.lowercased() == repo.lowercased() }) { repos.append(repo) }
+        }
+        githubRepos = repos.joined(separator: "\n")
     }
     func enableParameters(for pluginID: String) throws -> [String: JSONValue] {
         var config = original
@@ -164,6 +210,32 @@ struct PluginConfigurationDraft {
             config["team_id"] = .string(slackTeamID.trimmingCharacters(in: .whitespacesAndNewlines))
             config["messages_enabled"] = .bool(slackMessagesEnabled)
             config["send_enabled"] = .bool(slackSendEnabled)
+        } else if pluginID == "linear" {
+            config["account"] = .string(account.isEmpty ? "default" : account)
+            config["credentials_file"] = .string(credentialsFile)
+            config["workspace"] = .string(linearWorkspace.trimmingCharacters(in: .whitespacesAndNewlines))
+            config["issues_enabled"] = .bool(linearIssuesEnabled)
+            config["comments_enabled"] = .bool(linearCommentsEnabled)
+            config["state_changes_enabled"] = .bool(linearStateChangesEnabled)
+        } else if pluginID == "github" {
+            let repos = githubRepoList
+            guard githubAuth == "gh" || githubAuth == "token" else { throw WorkboardError(message: "Choose gh CLI sign-in or a personal access token.") }
+            if githubAuth == "gh" { guard githubExecutable.hasPrefix("/") else { throw WorkboardError(message: "Enter the absolute path to the gh executable.") } }
+            else { guard credentialsFile.hasPrefix("/") else { throw WorkboardError(message: "Choose the token JSON file.") } }
+            guard (1...20).contains(repos.count) else { throw WorkboardError(message: "Enter 1 to 20 repositories, one owner/name per line.") }
+            if let invalid = repos.first(where: { !GitHubRepoName.isValid($0) }) { throw WorkboardError(message: "Write each repository as owner/name: \(invalid)") }
+            if original["auth"] != nil || githubAuth != "gh" { config["auth"] = .string(githubAuth) }
+            if githubAuth == "gh" { config["gh_executable"] = .string(githubExecutable) }
+            else {
+                guard Self.isValidGitHubAccount(account.isEmpty ? "default" : account) else {
+                    throw WorkboardError(message: "Write the account label with 1 to 80 ASCII letters, digits, periods, underscores, hyphens, or @, without spaces.")
+                }
+                config["credentials_file"] = .string(credentialsFile)
+                if original["account"] != nil || !(account.isEmpty || account == "default") { config["account"] = .string(account.isEmpty ? "default" : account) }
+            }
+            if repos != savedGitHubRepos { config["repos"] = .array(repos.map(JSONValue.string)) }
+            if original["write_enabled"] != nil || githubWriteEnabled { config["write_enabled"] = .bool(githubWriteEnabled) }
+            for (key, value) in config where Self.githubSecretKeys.contains(key.lowercased()) && value != .null { config[key] = .null }
         } else {
             let edited = try JSONDecoder().decode(JSONValue.self, from: Data(advancedJSON.utf8))
             guard case .object(let fields) = edited else { throw WorkboardError(message: "Configuration must be a JSON object.") }
@@ -210,13 +282,33 @@ private struct PluginConfigurationView: View {
                     Toggle("Enable Slack message reading", isOn: $draft.slackMessagesEnabled)
                     Toggle("Send selected task status to Slack (optional)", isOn: $draft.slackSendEnabled)
                     Text("Use a User Token with search:read and conversation read permissions. Sending also requires chat:write. Save, then choose ‘Use’ to connect the token. Tokens are stored in macOS Keychain.").font(.caption).foregroundStyle(Color.secondary)
+                } else if plugin.id == "linear" {
+                    HStack { TextField("Linear API key JSON file", text: $draft.credentialsFile); Button("Choose…") { chooseFile { draft.credentialsFile = $0 } } }
+                    TextField("Account label", text: $draft.account)
+                    TextField("Workspace URL key (linear.app/<key>)", text: $draft.linearWorkspace)
+                    Toggle("Enable Linear issue reading", isOn: $draft.linearIssuesEnabled)
+                    Toggle("Post selected task status as Linear comments (optional)", isOn: $draft.linearCommentsEnabled)
+                    Toggle("Change Linear issue state from the board (optional)", isOn: $draft.linearStateChangesEnabled)
+                    Text("Use a Linear personal API key. Save, then choose ‘Use’ to connect the key. Keys are stored in macOS Keychain.").font(.caption).foregroundStyle(Color.secondary)
+                } else if plugin.id == "github" {
+                    Picker("Sign-in", selection: $draft.githubAuth) { Text("gh CLI sign-in").tag("gh"); Text("Personal access token").tag("token") }
+                    if draft.githubAuth == "token" {
+                        HStack { TextField("Token JSON file", text: $draft.credentialsFile); Button("Choose…") { chooseFile { draft.credentialsFile = $0 } } }
+                        TextField("Account label", text: $draft.account)
+                    } else { HStack { TextField("gh executable path", text: $draft.githubExecutable); Button("Choose…") { chooseFile { draft.githubExecutable = $0 } } } }
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack { Text("Repositories"); Spacer(); Button("Add board project repositories") { draft.addGitHubRepos(for: board.projects) }.disabled(board.projects.isEmpty) }
+                        TextEditor(text: $draft.githubRepos).font(.system(.caption, design: .monospaced)).frame(height: 76)
+                    }
+                    Toggle("Allow comments and issue creation (optional)", isOn: $draft.githubWriteEnabled)
+                    Text("One owner/name per line, up to 20 repositories on github.com. Never put a token in configuration: the plugin reads the gh sign-in, or stores the token from the JSON file in macOS Keychain when you choose ‘Use’. Writing asks for confirmation every time.").font(.caption).foregroundStyle(Color.secondary)
                 } else { Section { TextEditor(text: $draft.advancedJSON).font(.system(.caption, design: .monospaced)).frame(height: 100) } header: { Text("Configuration JSON") } }
                 if !loaded && plugins.error == nil { ProgressView("Reading current configuration…").controlSize(.small) }
                 if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             }.formStyle(.grouped).disabled(!loaded || plugins.busy)
             Divider()
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if plugins.busy { ProgressView().controlSize(.small) }; Button("Save and enable") { enable() }.buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent)).keyboardShortcut(.defaultAction).disabled(!loaded || plugins.busy) }.padding(20)
-        }.frame(width: 560, height: plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : plugin.id == "orca" ? 440 : 365).task {
+        }.frame(width: 560, height: plugin.id == "github" ? 540 : plugin.id == "linear" ? 530 : plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : plugin.id == "orca" ? 440 : 365).task {
             plugins.error = nil
             guard let response = await plugins.call("plugin.config", params: ["id": .string(plugin.id)], configuration: appearance.connection) else { return }
             guard case .object = response["config"] else { plugins.error = "Could not read the current plugin configuration."; return }
@@ -354,14 +446,9 @@ private struct OrcaBrowserView: View {
     }
     /// The board project whose folder is this worktree's Orca repository, or contains the worktree.
     private func project(for item: JSONValue) -> BoardProject? {
-        let paths = [item["repo_path"].string, item["path"].string].compactMap { $0 }.map(Self.canonical)
-        return board.projects.first { project in
-            guard project.directory.hasPrefix("/") else { return false }
-            let directory = Self.canonical(project.directory)
-            return paths.contains { $0 == directory || $0.hasPrefix(directory + "/") }
-        }
+        let paths = [item["repo_path"].string, item["path"].string].compactMap { $0 }
+        return board.projects.first { project in paths.contains { OrcaPaths.path($0, isInside: project.directory) } }
     }
-    private static func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
     private func loadTerminals(_ item: JSONValue) async {
         if let result = await plugins.run(plugin, method: "terminals.list", params: ["worktree_id": item["id"]], configuration: appearance.connection) {
             terminals = result["terminals"].array
@@ -412,6 +499,137 @@ private struct OrcaBrowserView: View {
     }
 }
 
+/// Folder comparisons between board projects and Orca repositories or worktrees.
+enum OrcaPaths {
+    static func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
+    /// Whether `path` is `folder` or inside it.
+    static func path(_ path: String, isInside folder: String) -> Bool {
+        guard path.hasPrefix("/"), folder.hasPrefix("/") else { return false }
+        let candidate = canonical(path), container = canonical(folder)
+        return candidate == container || candidate.hasPrefix(container.hasSuffix("/") ? container : container + "/")
+    }
+    /// Connected repositories for a project folder: the repository that contains the folder, or else those inside it.
+    static func repositories(_ repos: [JSONValue], for directory: String) -> [String] {
+        let containing = repos.filter { path(directory, isInside: $0["path"].string ?? "") }
+        let matched = containing.isEmpty ? repos.filter { path($0["path"].string ?? "", isInside: directory) } : containing
+        return matched.compactMap { $0["id"].string }
+    }
+    static func summary(repository: String?, branch: String?, status: String? = nil) -> String {
+        let shortBranch = branch.map { $0.hasPrefix("refs/heads/") ? String($0.dropFirst(11)) : $0 }
+        return [repository, shortBranch, status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+/// Links an Orca worktree to a task from its card or details. Lists the task project's repository first.
+struct OrcaWorktreePicker: View {
+    @EnvironmentObject private var store: BoardStore
+    @EnvironmentObject private var appearance: AppearanceSettings
+    @Environment(\.dismiss) private var dismiss
+    let task: BoardTask
+    @StateObject private var plugins = PluginStore()
+    @State private var projectRepoIDs: [String] = []
+    @State private var showAll = false
+    @State private var worktrees: [JSONValue] = []
+    @State private var loaded = false
+    @State private var truncated = false
+    @State private var linked: Set<String> = []
+    @State private var query = ""
+
+    private var project: BoardProject? { store.projects.first { $0.id == task.projectID } }
+    private var visible: [JSONValue] {
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return worktrees.filter { item in
+            (showAll || projectRepoIDs.isEmpty || projectRepoIDs.contains(item["repo_id"].string ?? ""))
+            && (needle.isEmpty || [item["title"].string, item["branch"].string, item["path"].string].contains { $0?.lowercased().contains(needle) == true })
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Link an Orca worktree").font(.title3.weight(.semibold))
+                Text(task.title).font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+            }.padding([.horizontal, .top], 22).padding(.bottom, 14)
+            HStack(spacing: 12) {
+                TextField("Filter by name, branch, or folder", text: $query).textFieldStyle(.roundedBorder)
+                if !projectRepoIDs.isEmpty { Toggle("All repositories", isOn: $showAll).toggleStyle(.checkbox) }
+            }.padding(.horizontal, 22)
+            if loaded && projectRepoIDs.isEmpty && store.orcaPlugin != nil {
+                Text("No connected Orca repository matches the folder of \(project?.name ?? "this project"), so every connected repository is shown. Add the repository in Orca plugin settings to narrow this list.")
+                    .font(.caption).foregroundStyle(Color.secondary).padding(.horizontal, 22).padding(.top, 8)
+            }
+            Divider().padding(.top, 12)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if !loaded { ProgressView("Reading Orca worktrees…").controlSize(.small).padding(30).frame(maxWidth: .infinity) }
+                    else if visible.isEmpty { Text(worktrees.isEmpty ? "No worktrees found." : "No worktrees match the filter.").font(.callout).foregroundStyle(Color.secondary).padding(30).frame(maxWidth: .infinity) }
+                    ForEach(Array(visible.enumerated()), id: \.offset) { row in
+                        let item = row.element
+                        let identifier = item["id"].string ?? ""
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item["title"].string ?? item["path"].string ?? "Worktree").font(.callout.weight(.medium)).lineLimit(1)
+                                Text(OrcaPaths.summary(repository: showAll || projectRepoIDs.count != 1 ? item["repo_name"].string : nil, branch: item["branch"].string, status: item["workspace_status"].string)).font(.caption).foregroundStyle(Color.secondary).lineLimit(1)
+                                Text(item["path"].string ?? "").font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                            }
+                            Spacer(minLength: 8)
+                            if linked.contains(identifier) { Label("Linked", systemImage: "checkmark").font(.caption).foregroundStyle(Color.secondary) }
+                            else { Button("Link") { link(identifier) }.disabled(plugins.busy || identifier.isEmpty) }
+                        }.padding(.horizontal, 22).padding(.vertical, 10)
+                        Divider().padding(.leading, 22)
+                    }
+                }
+            }
+            Divider()
+            HStack(spacing: 10) {
+                if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).lineLimit(3).textSelection(.enabled) }
+                else if truncated { Text("Showing partial results. Filter the list or use the CLI for every worktree.").font(.caption).foregroundStyle(Color.secondary) }
+                Spacer()
+                if plugins.busy { ProgressView().controlSize(.small) }
+                Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
+            }.padding(16)
+        }.frame(width: 540, height: 560)
+            .task { await load() }
+            .onChange(of: showAll) { if projectRepoIDs.count == 1 { Task { await loadWorktrees() } } }
+    }
+
+    private func load() async {
+        guard let plugin = store.orcaPlugin else { plugins.error = "Connect the Orca plugin in Settings → Plugins first."; loaded = true; return }
+        let configuration = appearance.connection
+        if let current = await plugins.call("task.get", params: ["task_id": .string(task.id)], configuration: configuration) {
+            linked = Set(current["artifacts"].array.map { TaskArtifact($0, index: 0) }.filter(\.isOrcaWorktree).compactMap(\.locator))
+        }
+        if let check = await plugins.run(plugin, method: "check", configuration: configuration), let directory = project?.directory {
+            projectRepoIDs = OrcaPaths.repositories(check["repos"].array, for: directory)
+        }
+        await loadWorktrees()
+    }
+    private func loadWorktrees() async {
+        guard let plugin = store.orcaPlugin else { return }
+        var params: [String: JSONValue] = ["limit": .number(100)]
+        if !showAll && projectRepoIDs.count == 1 { params["repo_id"] = .string(projectRepoIDs[0]) }
+        if let result = await plugins.run(plugin, method: "worktrees.list", params: params, configuration: appearance.connection) {
+            worktrees = result["worktrees"].array; truncated = result["truncated"].bool ?? false
+        }
+        loaded = true
+    }
+    private func link(_ worktreeID: String) {
+        guard let plugin = store.orcaPlugin else { return }
+        let configuration = appearance.connection
+        let identity = configuration.identity()
+        Task {
+            // Linking adds a board link only, so it uses the current revision instead of the card's copy.
+            guard let current = await plugins.call("task.get", params: ["task_id": .string(task.id)], configuration: configuration),
+                  await plugins.run(plugin, method: "worktrees.attach", params: ["worktree_id": .string(worktreeID), "task_id": .string(task.id), "expected_revision": current["task"]["revision"]], configuration: configuration) != nil,
+                  appearance.connection.identity() == identity else { return }
+            linked.insert(worktreeID)
+            store.notice = "Orca worktree linked."
+            await store.reload(force: true)
+            if store.selectedTaskID == task.id { await store.loadDetail(task.id) }
+            dismiss()
+        }
+    }
+}
+
 struct PluginBrowserView: View {
     @EnvironmentObject private var appearance: AppearanceSettings
     @EnvironmentObject private var board: BoardStore
@@ -432,7 +650,7 @@ struct PluginBrowserView: View {
     @State private var showingCapture = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { VStack(alignment: .leading, spacing: 5) { Text(plugin.name).font(.title2.weight(.semibold)); Text(plugin.id == "orca" ? "Browse worktrees and runs, and link them to board tasks." : plugin.id == "gmail" ? "Find mail and attach it to a task or import it as a new task." : plugin.id == "slack" ? "Read source messages and attach or import them as tasks." : "Read search results, verify the source, and attach evidence.").font(.caption).foregroundStyle(Color.secondary) }; Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(22)
+            HStack { VStack(alignment: .leading, spacing: 5) { Text(plugin.name).font(.title2.weight(.semibold)); Text(plugin.id == "orca" ? "Browse worktrees and runs, and link them to board tasks." : plugin.id == "gmail" ? "Find mail and attach it to a task or import it as a new task." : plugin.id == "slack" ? "Read source messages and attach or import them as tasks." : plugin.id == "linear" ? "Read issues and attach or import them as tasks." : plugin.id == "github" ? "Browse issues and pull requests, link them to tasks, and check linked status." : "Read search results, verify the source, and attach evidence.").font(.caption).foregroundStyle(Color.secondary) }; Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(22)
             Divider()
             if plugin.id == "google-workspace" {
                 TabView {
@@ -443,12 +661,14 @@ struct PluginBrowserView: View {
             else if plugin.id == "gmail" { gmailContent }
             else if plugin.id == "agent-memory" { memoryContent }
             else if plugin.id == "slack" { SlackMessagesView(plugin: plugin, plugins: plugins, configuration: appearance.connection).id(appearance.connection.identity()) }
+            else if plugin.id == "linear" { LinearIssuesView(plugin: plugin, plugins: plugins, configuration: appearance.connection).id(appearance.connection.identity()) }
             else if plugin.id == "orca" { OrcaBrowserView(plugin: plugin, plugins: plugins).id(appearance.connection.identity()) }
+            else if plugin.id == "github" { GitHubItemsView(plugin: plugin, plugins: plugins, configuration: appearance.connection).id(appearance.connection.identity()) }
             else { Text("Use this plugin’s features through the CLI.").foregroundStyle(Color.secondary).padding(25); Spacer() }
             if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled).padding(.horizontal, 22).padding(.bottom, 12) }
             if let notice = plugins.notice { Label(notice, systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green).padding(.horizontal, 22).padding(.bottom, 12) }
             if plugins.busy { HStack { ProgressView().controlSize(.small); Text("Waiting for the plugin…").font(.caption).foregroundStyle(Color.secondary); Spacer() }.padding(.horizontal, 22).padding(.bottom, 15) }
-        }.frame(width: 740, height: 650).onAppear { plugins.error = nil; plugins.notice = nil; projectID = board.selectedProjectID ?? board.projects.first?.id ?? "" }
+        }.frame(width: plugin.id == "github" ? 860 : 740, height: plugin.id == "github" ? 700 : 650).onAppear { plugins.error = nil; plugins.notice = nil; projectID = board.selectedProjectID ?? board.projects.first?.id ?? "" }
             .sheet(isPresented: $showingCapture) { MemoryCaptureView(plugin: plugin, plugins: plugins) }
     }
     private var gmailContent: some View {
@@ -545,7 +765,8 @@ struct SlackMessage: Identifiable {
     }
 }
 
-@MainActor final class SlackSession: ObservableObject {
+/// Ties plugin calls to the board connection that opened a plugin view.
+@MainActor final class PluginSession: ObservableObject {
     let configuration: ConnectionConfiguration
     private var active = true
     private var observation: AnyCancellable?
@@ -563,6 +784,7 @@ struct SlackMessage: Identifiable {
     }
     func close() { active = false; observation = nil }
 }
+typealias SlackSession = PluginSession
 
 struct SlackStatusSend {
     let taskID: String
@@ -588,7 +810,7 @@ private struct SlackMessagesView: View {
     @EnvironmentObject private var board: BoardStore
     let plugin: InstalledPlugin
     @ObservedObject var plugins: PluginStore
-    @StateObject private var session: SlackSession
+    @StateObject private var session: PluginSession
     @State private var query = ""
     @State private var searchedQuery = ""
     @State private var messages: [SlackMessage] = []
@@ -603,7 +825,7 @@ private struct SlackMessagesView: View {
 
     init(plugin: InstalledPlugin, plugins: PluginStore, configuration: ConnectionConfiguration) {
         self.plugin = plugin; self.plugins = plugins
-        _session = StateObject(wrappedValue: SlackSession(configuration: configuration))
+        _session = StateObject(wrappedValue: PluginSession(configuration: configuration))
     }
 
     var body: some View {

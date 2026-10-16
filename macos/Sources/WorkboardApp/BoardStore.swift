@@ -32,6 +32,9 @@ import Combine
     @Published var draft: TaskDraft?
     @Published var showingNewProject = false
     @Published var completionTask: BoardTask?
+    /// The enabled Orca plugin, so cards can link worktrees without opening plugin settings.
+    @Published var orcaPlugin: InstalledPlugin?
+    @Published var worktreeLinkTask: BoardTask?
     @Published var deletionTask: BoardTask?
     @Published var purgeItem: TrashItem?
     @Published var confirmingEmptyTrash = false
@@ -106,7 +109,7 @@ import Combine
         if connectionIdentity != nil { pendingDeepLink = nil }
         connectionIdentity = identity; connectionGeneration = UUID()
         eventSequence = nil; widgetConfigurationKey = nil; lastUpdated = nil
-        projects = []; tasks = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil
+        projects = []; tasks = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
         templates = []; savedViews = []; inbox = []; trash = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
         queryResultIDs = nil; queryResultKey = nil
         draft = nil; completionTask = nil; deletionTask = nil; purgeItem = nil; confirmingEmptyTrash = false; undoDeletion = nil; showingNewProject = false
@@ -205,6 +208,15 @@ import Combine
     func openTask(_ id: String) async {
         guard tasks.contains(where: { $0.id == id }) else { return }
         selectedTaskID = id; detail = nil; await loadDetail(id)
+        await refreshPlugins()
+    }
+    func refreshPlugins() async {
+        let configuration = appearance.connection
+        let identity = configuration.identity()
+        let generation = connectionGeneration
+        guard let response = try? await client.call("plugin.list", configuration: configuration),
+              isCurrentConnection(identity, generation: generation) else { return }
+        orcaPlugin = response["plugins"].array.compactMap(InstalledPlugin.init).first { $0.id == "orca" && $0.enabled && $0.compatible }
     }
     func loadDetail(_ id: String) async {
         let configuration = appearance.connection

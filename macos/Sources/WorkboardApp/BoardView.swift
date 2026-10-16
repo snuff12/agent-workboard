@@ -37,6 +37,8 @@ struct BoardView: View {
         .sheet(item: $store.draft) { draft in TaskEditorView(draft: draft) }
         .sheet(isPresented: $store.showingNewProject) { NewProjectView() }
         .sheet(item: $store.completionTask) { task in CompleteTaskView(task: task) }
+        .sheet(item: $store.worktreeLinkTask) { task in OrcaWorktreePicker(task: task) }
+        .task(id: appearance.connection.identity()) { await store.refreshPlugins() }
         .confirmationDialog(store.deletionTask.map { "Delete “\($0.title)”?" } ?? "Delete task?", isPresented: Binding(get: { store.deletionTask != nil }, set: { if !$0 { store.deletionTask = nil } }), titleVisibility: .visible, presenting: store.deletionTask) { task in
             Button("Move to Trash", role: .destructive) { Task { await store.delete(task) } }
             Button("Cancel", role: .cancel) {}
@@ -291,6 +293,7 @@ struct TaskCard: View {
                 Divider()
                 ForEach(WorkStatus.allCases) { status in Button { Task { await store.move(task, to: status) } } label: { Label(status.title, systemImage: status.symbol) }.disabled(task.status == status || store.isMutating) }
                 Divider()
+                if store.orcaPlugin != nil { Button("Link Orca worktree…") { store.worktreeLinkTask = task } }
                 Button("Copy task link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString("workboard://task/\(task.id)", forType: .string); store.notice = "Task link copied." }
                 Button("Copy resume context") { Task { await store.resumeContext(task) } }
                 Divider()
