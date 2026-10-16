@@ -120,6 +120,34 @@ Added issue search/reading, task/subtask attachment/import, selected status comm
 
 Actual workspace authentication, key permissions, search/read, comments, state changes, and Linear Keychain items remain unverified. Swift build/model checks are not native interaction proof; no Swift→CLI test drives the Linear screen. See [Linear](linear.md).
 
+## GitHub verification
+
+Added issue and pull request listing, scoped search, exact reads, task/subtask import and attachment, linked status, and separately enabled status comments and issue creation on October 16, 2026. The plugin was not installed in the user's board.
+
+| Check | Result |
+| --- | --- |
+| Provider | 89 checks in `test_github_plugin.py` with HTTP, Keychain, and gh replaced: secret rejection, credentials, identity file, route allow-list, error mapping, renamed repositories versus moved items, scope and identity validation, exact search queries, pagination clamps, checks and reviews aggregation, import/attach requests, preview text and fence safety, write gating, pre-send versus uncertain writes, and the time limit. |
+| Host | 12 actual CLI/provider/service/SQLite checks in `test_github_host.py`, with only GitHub HTTP and the gh sign-in replaced: subtask import retries, stale revisions, read-only refusal of mutations, host-read tasks, comment and issue links applied once, lost responses, revision changes during a write, disable/remove preservation, doctor, and no token under the data directory. |
+| Regressions | Rust 74 and Python 254 passed, including the GitHub checks above. |
+| Swift | `swift build`, the three Swift runners, and an unsigned Xcode `WorkboardApp` build passed. Runner checks cover configuration round trips, link validation, remote parsing, pending-write retention and persistence, and actual-CLI request ID reuse with a fake provider. |
+| ZIPs | Five packages, including `github-0.1.0`, contained only manifest/executable, installed disabled, and started no provider or service. |
+
+A read-only live check used the gh sign-in on this Mac (`auth: gh`) against the public `snuff12/agent-workboard` repository with a disposable board and socket. The installed package came from the built ZIP.
+
+| Step | Result |
+| --- | --- |
+| Install and enable | Installed disabled; `plugin check` returned `PLUGIN_DISABLED` until enabled. |
+| Check and authorize | Account `snuff12`, one accessible repository, no unmatched entries. gh-mode `authorize` recorded the login, and `identity_verified` became true. |
+| List | Cursor paging across issues and pull requests, numbered pages for closed pull requests, and an empty issue-only list (the repository has no issues). |
+| Search | Merged pull requests and a text search returned only repository rows with matching totals. A `repo:` qualifier was rejected before any request. |
+| Read | Pull request #4 (merged, head commit, branches) by number and #5 by URL. An unconfigured repository returned `PLUGIN_SCOPE_MISMATCH`, and a missing number returned `INTEGRATION_NOT_FOUND`. |
+| Status | #4 and #5 reported state, merged, no checks (`none`), and no reviews. #4 was unchanged against its read version. An unconfigured entry reported its own error. |
+| Import and attach | #5 became a To do subtask without an assignee, with the plugin-written goal and a link carrying the locator and source version. An identical import request returned the same response. Attaching #4 succeeded once. A stale revision returned `PLUGIN_ERROR` with `REVISION_CONFLICT`, and a wrong source version returned `CONFLICT`. |
+| Writes | `tasks.preview` rendered the comment and issue text, showed the public repository and posting login, and made no write. With writing off, `tasks.comment` and `tasks.create_issue` returned `INTEGRATION_DISABLED` with "No GitHub write was made." |
+| Removal | Disabling and removing the plugin left tasks, revisions, and links unchanged, and doctor passed. The gh token appeared in no file under the disposable board. |
+
+No GitHub comment or issue was created, and token-mode Keychain storage was not exercised with a real token. Native interaction with the GitHub screens remains unverified. See [GitHub](github.md).
+
 ## Commands
 
 ```sh
@@ -187,6 +215,7 @@ The cause was not established. Two changes were made:
 | Native app | Seven baseline XCUITests on the second Mac. | New planning/plugin screens and shortcuts, menu bar, restore picker/confirmation; widget links were manually verified but not automated. |
 | Slack accounts | Mocked provider/host and Swift checks. | Actual token/workspace permissions, search/read/sending, Keychain. |
 | Linear accounts | Mocked provider/host and Swift model checks; invalid-key error shape from the real API. | Actual API key/workspace permissions, search/read, comments, state changes, Keychain. |
+| GitHub writes | Mocked provider/host and Swift checks; live gh-mode reads on a public repository. | Actual status comment and issue creation, token-mode Keychain, fine-grained token permissions, native GitHub screens. |
 | Orca agents | Isolated actual runtime and harmless terminal launch. | Actual agent authentication/model calls and native launch controls. |
 | External distribution | Local ad-hoc installation/DMG; personal-team widget proof. No Developer ID on the second Mac. | Developer ID/hardened runtime/notarization and target-Mac installation. |
 

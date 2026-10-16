@@ -1,0 +1,14 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "executable": "plugin.py",
+  "methods": ["check", "authorize", "disconnect", "items.list", "items.search", "items.read", "items.status",
+              "items.import", "items.attach", "tasks.preview", "tasks.comment", "tasks.create_issue"],
+  "read_only_methods": ["check", "items.list", "items.search", "items.read", "items.status", "tasks.preview"],
+  "task_context_methods": ["tasks.preview", "tasks.comment", "tasks.create_issue"],
+  "allowed_requests": ["task.create", "task.attach"],
+  "timeout_seconds": 60,
+  "description": "Browse issues and pull requests in connected GitHub repositories, import or attach them to tasks, and check linked status. Enable writing separately to comment task status or create issues."
+}

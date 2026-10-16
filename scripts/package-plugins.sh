@@ -7,7 +7,7 @@ OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd -P)"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/workboard-plugins.XXXXXX")"
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
-for plugin in agent-memory google-workspace slack linear orca; do
+for plugin in agent-memory google-workspace slack linear orca github; do
     SOURCE="${REPO_DIR}/plugins/${plugin}"
     MANIFEST="${SOURCE}/plugin.json"
     IDENTIFIER="$(plutil -extract id raw -o - "$MANIFEST")"

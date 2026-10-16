@@ -6,7 +6,7 @@ ARCHIVE_DIR="${2:-${REPO_DIR}/dist}"
 [[ -x "$CLI" ]] || { echo 'The workboard CLI executable to verify is missing.' >&2; exit 1; }
 VERIFY_DIR="$(mktemp -d /tmp/awb-plugin-packages.XXXXXX)"
 trap 'rm -rf "$VERIFY_DIR"' EXIT
-for plugin in agent-memory google-workspace slack linear orca; do
+for plugin in agent-memory google-workspace slack linear orca github; do
     VERSION="$(plutil -extract version raw -o - "${REPO_DIR}/plugins/${plugin}/plugin.json")"
     PACKAGE="${plugin}-${VERSION}"
     ARCHIVE="${ARCHIVE_DIR}/AgentWorkboard-plugin-${PACKAGE}.zip"

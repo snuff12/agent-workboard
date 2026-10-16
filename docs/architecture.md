@@ -26,6 +26,8 @@ flowchart TB
     R --> U[Linear GraphQL API]
     H --> O[Orca plugin]
     O --> P[Local Orca CLI]
+    H --> Q[GitHub plugin]
+    Q --> R[GitHub REST API]
 ```
 
 ## Sources of truth
@@ -64,6 +66,8 @@ Slack separates search results from source reads and rechecks source versions im
 Linear follows the same read, recheck, and attach pattern for issues. Status comments and state changes are enabled separately and use the latest task read by the host. Comments use an ID derived from the issue and task revision, so a new request cannot post the same status twice. State changes require the version from the last read and refuse issues that changed since. See [Linear](linear.md).
 
 Orca queries the configured local repository's worktrees and terminals through its CLI. Record assignment and a run first; launch with host-verified current task/run data. Per-run external journals prevent duplicate terminals and refuse uncertain relaunches. Link created terminals to board runs. Saved attachment requests and plugin-scoped `idempotency_key` values recover the attachment once after host interruption. Terminal exit does not complete the task. See [Orca](orca-integration.md).
+
+GitHub reads issues and pull requests only in configured github.com repositories and verifies each response against that scope. Imports and attachments recheck the source version. Linked-status checks only read GitHub and never change task status. Separately enabled writes use the latest task read by the host, preview the exact text, recheck the recorded posting account, and link the created comment or issue through a plugin-scoped `idempotency_key`. Uncertain writes are reported, never repeated. See [GitHub](github.md).
 
 ## State transitions
 

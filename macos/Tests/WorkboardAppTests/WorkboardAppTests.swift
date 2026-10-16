@@ -20,10 +20,17 @@ import Darwin
         try orcaWorktreeLinks()
         try slackContract()
         try linearContract()
+        try githubConfiguration()
+        try githubItemContract()
+        try githubArtifactLinks()
+        try githubRemoteParsing()
+        try githubPendingWrites()
         try await rpcArgumentsAndErrors()
+        try await githubErrorCodes()
         if let executable = ProcessInfo.processInfo.environment["WORKBOARD_BIN"], !executable.isEmpty {
             try await actualService(executable)
             try await connectionSwitchRecoveryAndPluginConfig(executable)
+            try await githubActualHost(executable)
         }
         print("✓ SwiftUI models, theme persistence and validation, RPC arguments, and error handling verified")
     }
@@ -261,6 +268,286 @@ import Darwin
         let change = issue.writeParameters(task: task, stateID: "s-done")
         try require(change["state_id"] == .string("s-done") && change["expected_version"] == json["version"], "Linear state change lost its target or read version")
         print("✓ Linear configuration, issue identity, source versions, links, write parameters, and state suggestions verified")
+    }
+    static func githubConfiguration() throws {
+        let saved: JSONValue = .object(["auth": .string("gh"), "gh_executable": .string("/opt/homebrew/bin/gh"), "repos": .array([.string("Octo-Org/app.web"), .string("octo/tools")]), "write_enabled": .bool(true), "host": .string("github.com"), "future_option": .object(["keep": .bool(true)])])
+        var draft = PluginConfigurationDraft(config: saved)
+        try require(draft.githubAuth == "gh" && draft.githubExecutable == "/opt/homebrew/bin/gh" && draft.githubWriteEnabled && draft.githubRepoList == ["Octo-Org/app.web", "octo/tools"], "GitHub settings were not restored")
+        let unchanged = try draft.enableParameters(for: "github")["config"]
+        try require(unchanged == saved, "Unchanged GitHub save changed the configuration")
+        let minimal: JSONValue = .object(["gh_executable": .string("/usr/local/bin/gh"), "repos": .array([.string("octo/app")])])
+        let minimalSaved = try PluginConfigurationDraft(config: minimal).enableParameters(for: "github")["config"]
+        try require(minimalSaved == minimal, "GitHub save added auth, account, or write keys the user did not change")
+        draft.githubRepos = " Octo-Org/app.web \n\nocto/tools\nOCTO/TOOLS"
+        let collapsed = try draft.enableParameters(for: "github")["config"]
+        try require(collapsed == saved, "Whitespace or duplicate repository lines rewrote the saved repository list")
+        draft.githubRepos += "\nocto/new-repo"; draft.githubWriteEnabled = false
+        let edited = try draft.enableParameters(for: "github")["config"]!
+        try require(edited["repos"] == .array([.string("Octo-Org/app.web"), .string("octo/tools"), .string("octo/new-repo")]) && edited["write_enabled"] == .bool(false) && edited["future_option"] == saved["future_option"] && edited["host"] == saved["host"], "GitHub edit lost repositories, unknown keys, or the write flag")
+        var tokenDraft = PluginConfigurationDraft(config: saved); tokenDraft.githubAuth = "token"; tokenDraft.credentialsFile = ""
+        try require((try? tokenDraft.enableParameters(for: "github")) == nil, "Token sign-in was saved without a credentials file")
+        tokenDraft.credentialsFile = "/secure/github-token.json"
+        let tokenConfig = try tokenDraft.enableParameters(for: "github")["config"]!
+        try require(tokenConfig["auth"].string == "token" && tokenConfig["credentials_file"].string == "/secure/github-token.json" && tokenConfig["account"] == .null && tokenConfig["gh_executable"] == saved["gh_executable"], "Token sign-in settings were not written as chosen")
+        for label in ["bob's token", "work token", "caf\u{E9}", "quote\"label", "back\\slash", "tab\tlabel", String(repeating: "a", count: 81)] {
+            var invalid = tokenDraft; invalid.account = label
+            do { _ = try invalid.enableParameters(for: "github"); throw Failure(description: "Unsafe GitHub account label was accepted: \(label.prefix(40))") }
+            catch let error as WorkboardError { try require(error.message.contains("account label"), "Account label error did not name the field: \(error.message)") }
+        }
+        var labeled = tokenDraft; labeled.account = "Work.bot_1@example-org"
+        let labeledConfig = try labeled.enableParameters(for: "github")["config"]
+        try require(labeledConfig?["account"].string == "Work.bot_1@example-org", "A valid GitHub account label was not saved")
+        labeled.account = String(repeating: "a", count: 80)
+        try require((try? labeled.enableParameters(for: "github")) != nil, "An 80-character account label was rejected")
+        labeled.account = ""
+        let defaultConfig = try labeled.enableParameters(for: "github")["config"]
+        try require(defaultConfig?["account"] == .null, "An empty account label did not fall back to the default")
+        var ghLabel = PluginConfigurationDraft(config: saved); ghLabel.account = "bob's token"
+        try require((try? ghLabel.enableParameters(for: "github")) != nil, "gh sign-in was blocked by the unused token account label")
+        var relative = PluginConfigurationDraft(config: saved); relative.githubExecutable = "gh"
+        try require((try? relative.enableParameters(for: "github")) == nil, "A gh executable found on PATH was accepted")
+        var unknownAuth = PluginConfigurationDraft(config: saved); unknownAuth.githubAuth = "oauth"
+        try require((try? unknownAuth.enableParameters(for: "github")) == nil, "An unknown sign-in method was accepted")
+        let invalidRepos = ["", (1...21).map { "octo/repo-\($0)" }.joined(separator: "\n"), "-octo/app", "octo/..", "octo/.", "octo/app/extra", "octo", "caf\u{E9}/app", "octo/app name", String(repeating: "a", count: 40) + "/app", "octo/" + String(repeating: "r", count: 101), "octo_org/app"]
+        for repos in invalidRepos {
+            var invalid = PluginConfigurationDraft(config: saved); invalid.githubRepos = repos
+            try require((try? invalid.enableParameters(for: "github")) == nil, "Invalid GitHub repository list was accepted: \(repos.prefix(40))")
+        }
+        var twenty = PluginConfigurationDraft(config: saved); twenty.githubRepos = (1...20).map { "octo/repo-\($0)" }.joined(separator: "\n")
+        try require((try? twenty.enableParameters(for: "github")) != nil, "Twenty repositories were rejected")
+        for value in [JSONValue.string("true"), .number(1), .null] {
+            try require(!PluginConfigurationDraft(config: .object(["write_enabled": value])).githubWriteEnabled, "Non-Boolean write_enabled enabled GitHub writing")
+        }
+        let leaked: JSONValue = .object(["gh_executable": .string("/opt/homebrew/bin/gh"), "repos": .array([.string("octo/app")]), "token": .string("placeholder-not-a-token"), "Access_Token": .string("placeholder"), "pat": .null, "password": .number(1), "notes": .string("keep")])
+        let cleaned = try PluginConfigurationDraft(config: leaked).enableParameters(for: "github")["config"]!
+        try require(cleaned.object.keys.contains("token") && cleaned["token"] == .null && cleaned["Access_Token"] == .null && cleaned["password"] == .null && cleaned["pat"] == .null && cleaned["notes"].string == "keep", "Saved secret-named GitHub keys were not cleared")
+        print("✓ GitHub configuration: round trip, unchanged keys, repository validation, token account label characters, non-Boolean write flag, and secret key clearing verified")
+    }
+    static func githubItemContract() throws {
+        let row: JSONValue = .object(["repo": .string("Octo/App"), "number": .number(42), "type": .string("pull"), "title": .string("Fix sign-in"), "state": .string("open"), "state_reason": .null, "draft": .bool(true), "merged": .bool(false), "author": .string("octocat"), "labels": .array([.string("bug")]), "assignees": .array([]), "comments": .number(3), "created_at": .string("2026-10-14T01:00:00Z"), "updated_at": .string("2026-10-15T01:00:00Z"), "closed_at": .null, "url": .string("https://github.com/Octo/App/pull/42")])
+        guard let item = GitHubItem(row) else { throw Failure(description: "GitHub row did not decode") }
+        try require(item.isPull && item.draft && !item.merged && item.locator == "Octo/App#42" && item.labels == ["bug"] && item.url?.absoluteString == "https://github.com/Octo/App/pull/42", "GitHub row fields or link were lost")
+        try require(item.parameters() == ["repo": .string("Octo/App"), "number": .number(42)], "A list row claimed a verified source version")
+        let unsafeLinks = ["https://github.com.evil.test/Octo/App/pull/42", "http://github.com/Octo/App/pull/42", "https://github.com/Octo/Other/pull/42", "https://github.com/Other/App/pull/42", "https://github.com/Octo/App/pull/43", "https://user@github.com/Octo/App/pull/42", "https://github.com:8443/Octo/App/pull/42", "https://github.com/Octo/App/commits/42", "https://github.com/Octo/App/pull/42?tab=files", "file:///Octo/App/pull/42", ""]
+        for unsafe in unsafeLinks {
+            var json = row.object; json["url"] = .string(unsafe)
+            try require(GitHubItem(.object(json))?.url == nil, "Unsafe GitHub link accepted: \(unsafe)")
+        }
+        var lowercase = row.object; lowercase["url"] = .string("https://github.com/octo/app/pull/42")
+        try require(GitHubItem(.object(lowercase))?.url != nil, "Case-insensitive repository link rejected")
+        var full = row.object; full["body"] = .string("Steps to reproduce"); full["version"] = .string("source-v1"); full["pull"] = .object(["head_ref": .string("fix-sign-in"), "base_ref": .string("main"), "head_sha": .string("0123456789abcdef")])
+        guard let read = GitHubItem(.object(full)) else { throw Failure(description: "Full GitHub read did not decode") }
+        let verified = read.parameters(verified: true)
+        try require(verified["expected_version"] == .string("source-v1") && verified["repo"] == .string("Octo/App") && verified["number"] == .number(42), "Verified GitHub mutations did not pass expected_version")
+        try require(read.headRef == "fix-sign-in" && read.baseRef == "main" && read.body == "Steps to reproduce", "Pull request branch or body lost")
+        for (key, value) in [("repo", JSONValue.string("octo/app/extra")), ("repo", .string("octo")), ("number", .number(0)), ("number", .number(4.5)), ("number", .string("42"))] {
+            var bad = row.object; bad[key] = value
+            try require(GitHubItem(.object(bad)) == nil, "Malformed GitHub row accepted: \(key)")
+        }
+        try require(GitHubItemReference(url: "https://github.com/Octo/App/issues/7")?.key == "octo/app#7" && GitHubItemReference(url: "https://github.com/Octo/App/issues/7")?.isPull == false, "Issue link not parsed")
+        for url in ["https://github.com/Octo/App/issues/7#issuecomment-1", "https://github.com/Octo/App/issues/007", "https://github.com/Octo/App/issues/+7", "https://github.com/Octo/App/issues/7/files", "https://github.com/Octo/App/issues/99999999999"] {
+            try require(GitHubItemReference(url: url) == nil, "Non-canonical GitHub item link accepted: \(url)")
+        }
+        print("✓ GitHub items: row decoding, link validation, and verified source versions in mutations verified")
+    }
+    static func githubArtifactLinks() throws {
+        let data = Data(#"{"task":{"id":"t","project_id":"p","title":"Task","revision":3},"artifacts":[{"id":"a1","path":"https://github.com/octo/app/issues/12","kind":"url","provider":"github","locator":"octo/app#12","description":"GitHub issue octo/app#12: Crash","metadata":{"provider":"github","repo":"octo/app","number":12,"state":"open","source_version":"v1"}},{"id":"a2","path":"https://github.com/octo/app/issues/12#issuecomment-99","kind":"url","provider":"github","locator":"octo/app#12","metadata":{"kind":"status_comment"}},{"id":"a3","path":"https://github.com/other/repo/pull/5","provider":"github","metadata":{}},{"id":"a4","path":"https://github.com.evil.test/octo/app/issues/13","provider":"github"},{"id":"a5","path":"https://github.com/octo/app/pull/14","provider":"slack"},{"id":"a6","path":"https://github.com/Octo/App/issues/12","provider":"github","metadata":{"source_version":"v2","state":"closed"}},{"id":"a7","path":"/local/file.md"},{"id":"a8","path":"https://github.com/octo/app/pull/15","provider":"github","metadata":{"source_version":"x"}}]}"#.utf8)
+        guard let detail = TaskDetail(try JSONDecoder().decode(JSONValue.self, from: data)) else { throw Failure(description: "Task detail with GitHub artifacts did not decode") }
+        let first = detail.artifacts[0]
+        try require(first.provider == "github" && first.locator == "octo/app#12" && first.metadata["source_version"].string == "v1" && first.metadata["number"].int == 12, "TaskArtifact lost provider, locator, or metadata")
+        try require(detail.artifacts[6].provider == nil && detail.artifacts[6].locator == nil && detail.artifacts[6].metadata == .object([:]), "A plain artifact gained provider data")
+        let linked = GitHubLinkedItem.from(detail.artifacts, configuredRepos: ["Octo/App"])
+        try require(linked.map(\.id) == ["octo/app#12", "octo/app#15"] && linked[0].sourceVersion == "v2" && linked[0].linkedState == "closed" && linked[1].reference.isPull, "Linked GitHub items were not filtered and deduplicated: \(linked.map(\.id))")
+        try require(linked[0].statusParameters == .object(["repo": .string("Octo/App"), "number": .number(12), "source_version": .string("v2")]), "Status request lost the linked source version")
+        try require(GitHubLinkedItem.from(detail.artifacts, configuredRepos: []).isEmpty, "Items outside connected repositories were listed")
+        try require(GitHubLinkedItem.isLinked(itemKey: "Octo/App#12", in: detail.artifacts) && GitHubLinkedItem.isLinked(itemKey: "octo/app#15", in: detail.artifacts), "A canonical issue or pull request link was not recognized")
+        let commentOnly = [detail.artifacts[1]]
+        try require(commentOnly[0].locator == "octo/app#12" && !GitHubLinkedItem.isLinked(itemKey: "octo/app#12", in: commentOnly), "A status comment on the issue counted as a link to the issue")
+        try require(!GitHubLinkedItem.isLinked(itemKey: "octo/app#14", in: detail.artifacts) && !GitHubLinkedItem.isLinked(itemKey: "octo/app#13", in: detail.artifacts), "A link from another provider or host counted as a GitHub link")
+        let statusOnly: JSONValue = .object(["state": .string("open"), "checks": .object(["state": .string("success"), "runs_available": .bool(false)])])
+        let summary = GitHubLinkedItem.statusSummary(statusOnly)
+        try require(summary.contains("checks: success") && summary.contains("only commit statuses were read"), "Missing check runs were not reported: \(summary)")
+        for checks in [JSONValue.object(["state": .string("success"), "runs_available": .bool(true)]), .object(["state": .string("success")])] {
+            let full = GitHubLinkedItem.statusSummary(.object(["state": .string("open"), "checks": checks]))
+            try require(full == "open · checks: success", "Readable check runs were reported as missing: \(full)")
+        }
+        print("✓ GitHub links: artifact provider, locator, and metadata decoding, link re-validation, status comments not counted as links, status parameters, and status-only checks verified")
+    }
+    static func githubRemoteParsing() throws {
+        let accepted = ["https://github.com/octo/app": "octo/app", "https://github.com/octo/app.git": "octo/app", "https://github.com/octo/app/": "octo/app", "https://github.com/octo/app.git/": "octo/app", "https://GitHub.com/Octo/App": "Octo/App", "git@github.com:Octo-Org/my.repo.git": "Octo-Org/my.repo", "git@github.com:octo/app": "octo/app", "ssh://git@github.com/octo/app.git": "octo/app", "  https://github.com/octo/app.git  ": "octo/app"]
+        for (url, repo) in accepted { try require(GitHubRemote.repository(fromURL: url) == repo, "GitHub remote not parsed: \(url)") }
+        let rejected = ["https://gitlab.com/octo/app.git", "https://github.com.evil.test/octo/app", "git@example.com:octo/app.git", "git@github.com:/octo/app.git", "ssh://git@github.com:2222/octo/app.git", "ssh://deploy@github.com/octo/app.git", "https://token@github.com/octo/app.git", "http://github.com/octo/app", "https://github.com/octo", "https://github.com/octo/app/tree/main", "https://github.com/-octo/app", "https://github.com/octo/app%20name", "/local/path/app.git", ""]
+        for url in rejected { try require(GitHubRemote.repository(fromURL: url) == nil, "Non-GitHub or malformed remote accepted: \(url)") }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("workboard-github-remotes-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        func write(_ text: String, _ path: String) throws {
+            let url = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try write("[core]\n\trepositoryformatversion = 0\n[remote \"upstream\"]\n\turl = git@github.com:upstream-org/app.git\n[remote \"origin\"]\n\turl = https://github.com/octo/app.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n", "main/.git/config")
+        try write("../..\n", "main/.git/worktrees/feature/commondir")
+        try write("gitdir: ../main/.git/worktrees/feature\n", "feature/.git")
+        try write("[remote \"origin\"]\n\turl = https://gitlab.com/octo/app.git\n[remote \"backup\"]\n\turl = \"ssh://git@github.com/backup-org/app.git\"\n", "mixed/.git/config")
+        try write("[remote \"origin\"]\n\turl = https://gitlab.com/octo/other.git\n", "other/.git/config")
+        try write("gitdir: /does/not/exist\n", "broken/.git")
+        func repo(_ name: String) -> String? { GitHubRemote.repository(in: root.appendingPathComponent(name).path) }
+        try require(repo("main") == "octo/app", "origin was not preferred over another GitHub remote")
+        try require(repo("feature") == "octo/app", "Worktree .git file and commondir were not followed")
+        try require(repo("mixed") == "backup-org/app", "The first GitHub remote was not used when origin is elsewhere")
+        try require(repo("other") == nil && repo("broken") == nil && repo("missing") == nil && GitHubRemote.repository(in: "relative/path") == nil, "A missing or non-GitHub remote produced a repository")
+        var draft = PluginConfigurationDraft(config: .object(["repos": .array([.string("Octo/App")])]))
+        let projects = ["main", "feature", "mixed", "other"].compactMap { BoardProject(.object(["id": .string($0), "directory": .string(root.appendingPathComponent($0).path)])) }
+        draft.addGitHubRepos(for: projects)
+        try require(draft.githubRepoList == ["Octo/App", "backup-org/app"], "Board project repositories were not added once each: \(draft.githubRepoList)")
+        try require(GitHubRemote.repositories(for: projects) == ["main": "octo/app", "feature": "octo/app", "mixed": "backup-org/app"], "Project to repository map was wrong")
+        print("✓ GitHub remotes: https, scp, and ssh forms, .git suffix, trailing slash, wrong hosts, and worktree commondir verified")
+    }
+    static func githubPendingWrites() throws {
+        let configA = ConnectionConfiguration(executablePath: "/tmp/workboard-a", dataDirectory: "/tmp/board-a")
+        let configB = ConnectionConfiguration(executablePath: "/tmp/workboard-a", dataDirectory: "/tmp/board-b")
+        func task(_ id: String, revision: Int) -> BoardTask { BoardTask(.object(["id": .string(id), "project_id": .string("p"), "title": .string("Report"), "revision": .number(Double(revision))]))! }
+        let comment = GitHubWriteOperation(kind: .comment, taskID: "task-1", revision: 4, repo: "Octo/App", number: 12, configuration: configA)
+        try require(comment.parameters == ["task_id": .string("task-1"), "expected_revision": .number(4), "repo": .string("Octo/App"), "number": .number(12), "confirmed_by_user": .bool(true)], "Comment write parameters were wrong")
+        try require(comment.matches(kind: .comment, task: task("task-1", revision: 4), repo: "Octo/App", number: 12, configuration: configA), "Pending write did not match the same task, target, and board")
+        try require(comment.matches(kind: .comment, task: task("task-1", revision: 9), repo: "octo/app", number: 12, configuration: configA) && comment.parameters["expected_revision"] == .number(4), "A revision change dropped the pending write or its original revision")
+        try require(!comment.matches(kind: .comment, task: task("task-2", revision: 4), repo: "Octo/App", number: 12, configuration: configA), "Pending write matched another task")
+        try require(!comment.matches(kind: .comment, task: task("task-1", revision: 4), repo: "Octo/App", number: 13, configuration: configA) && !comment.matches(kind: .comment, task: task("task-1", revision: 4), repo: "Octo/Other", number: 12, configuration: configA), "Pending write matched another target")
+        try require(!comment.matches(kind: .comment, task: task("task-1", revision: 4), repo: "Octo/App", number: 12, configuration: configB) && !comment.matches(kind: .issue, task: task("task-1", revision: 4), repo: "Octo/App", number: nil, configuration: configA), "Pending write matched another board or write kind")
+        let issue = GitHubWriteOperation(kind: .issue, taskID: "task-1", revision: 4, repo: "Octo/App", number: nil, title: "Ship the release", configuration: configA)
+        try require(issue.parameters["number"] == nil && issue.parameters["confirmed_by_user"] == .bool(true) && issue.requestID != comment.requestID, "Issue write parameters or request IDs were wrong")
+        try require(comment.checkHint.contains("Octo/App#12") && issue.checkHint.contains("Ship the release"), "Pending write hint did not name the GitHub target")
+        // Failures after the provider ran can follow a GitHub write, so they keep the request ID. So do host refusals that come
+        // before the journal lookup, such as an uninstalled plugin, because a retry can follow an earlier attempt that posted.
+        let afterProvider = ["PLUGIN_ERROR", "PLUGIN_DISABLED", "PLUGIN_NOT_INSTALLED", "PLUGIN_METHOD_NOT_FOUND", "INVALID_PARAMS", "PLUGIN_CANCELLED", "PLUGIN_JOURNAL_ERROR", "PLUGIN_REQUEST_IN_PROGRESS", "REQUEST_ID_CONFLICT", "PLUGIN_EXTERNAL_RESULT_UNKNOWN", "PLUGIN_RESULT_UNCERTAIN", "PLUGIN_TIMEOUT", "INTEGRATION_UNAVAILABLE", "AUTHORIZATION_REQUIRED", "CONFLICT", "PLUGIN_FUTURE_CODE", ""]
+        for code in afterProvider {
+            try require(GitHubWriteOperation.shouldRetain(afterErrorCode: code, message: "NOT_FOUND: Task not found"), "Pending write was cleared after \(code.isEmpty ? "no service response" : code)")
+        }
+        try require(GitHubWriteOperation.shouldRetain(afterErrorCode: nil, message: nil), "Pending write was cleared without a recorded failure")
+        try require(GitHubWriteOperation.shouldRetain(afterErrorCode: "PLUGIN_ERROR", message: "No GitHub write was made. Then the link failed."), "A message that only starts with the no-write sentence cleared the pending write")
+        for code in ["PLUGIN_REVISION_CONFLICT", "PLUGIN_CONTEXT_UNAVAILABLE", "PLUGIN_INVALID_PARAMS"] {
+            try require(!GitHubWriteOperation.shouldRetain(afterErrorCode: code, message: "The host stopped first."), "Pending write was kept after a failure before the provider ran: \(code)")
+        }
+        for (code, message) in [("INVALID_REQUEST", "INVALID_REQUEST: This repository is archived. No GitHub write was made."), ("AUTHORIZATION_REQUIRED", "AUTHORIZATION_REQUIRED: Verify the GitHub account first. No GitHub write was made.\n"),
+                                ("INTEGRATION_DISABLED", "INTEGRATION_DISABLED: Enable GitHub writing separately. No GitHub write was made."), ("CONFLICT", "The task was changed elsewhere. Read the latest version before retrying.\nCONFLICT: Locked. No GitHub write was made."), ("PLUGIN_ERROR", "  PLUGIN_ERROR: Refused. No GitHub write was made.  ")] {
+            try require(!GitHubWriteOperation.shouldRetain(afterErrorCode: code, message: message), "Pending write was kept after a failure that made no GitHub write: \(code)")
+        }
+        let suite = "workboard-github-pending-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { throw Failure(description: "No test defaults") }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = GitHubPendingWrites(defaults: defaults)
+        try require(store.load(for: configA.identity()) == nil, "A new store restored a pending write")
+        let first = GitHubWriteOperation(kind: .comment, taskID: "task-1", revision: 4, repo: "Octo/App", number: 1, configuration: configA)
+        store.save(first)
+        guard let restored = GitHubPendingWrites(defaults: defaults).load(for: configA.identity()) else { throw Failure(description: "A pending GitHub write was not restored") }
+        try require(restored.requestID == first.requestID && restored.parameters == first.parameters && restored.kind == .comment && restored.label == first.label && restored.checkHint == first.checkHint, "A restored pending write lost its request ID or parameters")
+        try require(restored.parameters["number"] == .number(1) && restored.parameters["confirmed_by_user"] == .bool(true), "Restoring changed a number into a Boolean or lost the confirmation")
+        try require(restored.matches(kind: .comment, task: task("task-1", revision: 7), repo: "octo/app", number: 1, configuration: configA), "A restored pending write no longer matched its task and board")
+        try require(store.load(for: configB.identity()) == nil, "A pending write was restored for another board connection")
+        let other = GitHubWriteOperation(kind: .issue, taskID: "task-2", revision: 1, repo: "Octo/App", number: nil, title: "Other board", configuration: configB)
+        store.save(other)
+        try require(store.load(for: configA.identity())?.requestID == first.requestID && store.load(for: configB.identity())?.requestID == other.requestID, "Pending writes of two board connections replaced each other")
+        let newer = GitHubWriteOperation(kind: .comment, taskID: "task-1", revision: 5, repo: "Octo/App", number: 2, configuration: configA)
+        store.save(newer); store.remove(first)
+        try require(store.load(for: configA.identity())?.requestID == newer.requestID, "Removing an older write dropped the newer pending write")
+        store.remove(newer)
+        try require(store.load(for: configA.identity()) == nil && store.load(for: configB.identity())?.requestID == other.requestID, "Removing a write cleared the wrong board connection")
+        store.remove(other)
+        try require(defaults.object(forKey: GitHubPendingWrites.key) == nil, "Removing the last pending write left stored data")
+        defaults.set([configA.identity().executable + "\n" + configA.identity().dataDirectory + "\n" + configA.identity().socket: Data("{\"kind\":\"comment\"}".utf8)], forKey: GitHubPendingWrites.key)
+        try require(store.load(for: configA.identity()) == nil, "An incomplete stored write was restored")
+        print("✓ GitHub pending writes: matching ignores revision, requires the same task, target, and board; request IDs are kept unless the failure happened before any GitHub write; stored writes survive a new view and stay with their board connection")
+    }
+    @MainActor static func githubErrorCodes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("workboard github codes \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("workboard stub")
+        let configuration = ConnectionConfiguration(executablePath: executable.path, dataDirectory: directory.path, sharesWidgetSnapshot: false)
+        func stub(_ body: String) throws {
+            try ("#!/bin/sh\n" + body).write(to: executable, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        }
+        try stub("printf '%s\\n' '{\"ok\":false,\"error\":{\"code\":\"PLUGIN_EXTERNAL_RESULT_UNKNOWN\",\"message\":\"The GitHub write may have succeeded.\"}}'\nexit 1\n")
+        do { _ = try await WorkboardClient().call("plugin.run", configuration: configuration); throw Failure(description: "Plugin failure treated as success") }
+        catch let error as WorkboardError { try require(error.code == "PLUGIN_EXTERNAL_RESULT_UNKNOWN" && error.message.contains("may have succeeded"), "Service error code did not reach WorkboardError") }
+        let plugins = PluginStore()
+        _ = await plugins.call("plugin.run", params: [:], configuration: configuration)
+        try require(plugins.errorCode == "PLUGIN_EXTERNAL_RESULT_UNKNOWN" && plugins.error != nil && plugins.errorMessage == plugins.error, "PluginStore did not record the error code and message with the error")
+        plugins.error = nil
+        try require(plugins.errorCode == nil && plugins.errorMessage == nil, "Clearing the plugin error kept a stale error code or message")
+        try stub("printf '%s\\n' '{\"ok\":false,\"error\":{\"code\":\"PLUGIN_REVISION_CONFLICT\",\"message\":\"The task has changed.\"}}'\nexit 1\n")
+        _ = await plugins.call("plugin.run", params: [:], configuration: configuration)
+        try require(plugins.errorCode == "PLUGIN_REVISION_CONFLICT" && (plugins.error?.contains("changed elsewhere") ?? false), "Revision conflict lost its code or message")
+        try stub("printf '%s\\n' '{\"ok\":false,\"error\":{\"code\":\"CONFLICT\",\"message\":\"CONFLICT: The conversation is locked. No GitHub write was made.\"}}'\nexit 1\n")
+        _ = await plugins.call("plugin.run", params: [:], configuration: configuration)
+        try require(plugins.errorCode == "CONFLICT" && (plugins.errorMessage?.hasPrefix("The task was changed elsewhere") ?? false) && !GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage), "The no-write sentence was not found after the transport prefix: \(plugins.errorMessage ?? "none")")
+        try stub("printf '%s\\n' '{\"ok\":false,\"error\":{\"code\":\"REQUEST_ID_CONFLICT\",\"message\":\"REQUEST_ID_CONFLICT: A request_id cannot be reused for a different request.\"}}'\nexit 1\n")
+        _ = await plugins.call("plugin.run", params: [:], configuration: configuration)
+        try require(plugins.errorCode == "REQUEST_ID_CONFLICT" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage), "A request ID conflict cleared the pending write")
+        try stub("exit 1\n")
+        _ = await plugins.call("plugin.run", params: [:], configuration: configuration)
+        try require(plugins.errorCode == "" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage), "A missing service response was not recorded as an empty code")
+        let disabled = InstalledPlugin(.object(["id": .string("github"), "enabled": .bool(false)]))!
+        _ = await plugins.run(disabled, method: "tasks.comment", configuration: configuration)
+        try require(plugins.errorCode == "PLUGIN_DISABLED" && plugins.errorMessage == "Enable the plugin first.", "A disabled plugin did not record its code and message")
+        print("✓ Service error codes reach WorkboardError and PluginStore, and clear together with the error")
+    }
+    @MainActor static func githubActualHost(_ executable: String) async throws {
+        let directory = URL(fileURLWithPath: "/tmp/wbgh-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = try await startService(executable, directory: directory)
+        defer { if service.isRunning { service.terminate() }; service.waitUntilExit() }
+        func quote(_ string: String) -> String { "'" + string.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+        let configuration = ConnectionConfiguration(executablePath: executable, dataDirectory: directory.path, sharesWidgetSnapshot: false)
+        let client = WorkboardClient()
+        let project = try await client.call("project.create", params: ["name": .string("GitHub fixture")], configuration: configuration)
+        let created = try await client.call("task.create", params: ["project_id": project["project_id"], "title": .string("Report status")], configuration: configuration)
+        guard let taskID = created["task_id"].string else { throw Failure(description: "GitHub fixture task missing") }
+        func currentTask() async throws -> BoardTask {
+            guard let task = BoardTask(try await client.call("task.get", params: ["task_id": .string(taskID)], configuration: configuration)["task"]) else { throw Failure(description: "GitHub fixture task unreadable") }
+            return task
+        }
+        // A fake provider that never contacts GitHub: it records each invocation and reports an uncertain write.
+        let package = directory.appendingPathComponent("github-package"), posts = directory.appendingPathComponent("fake-github-posts")
+        try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+        let manifest: JSONValue = .object(["id": .string("github"), "name": .string("GitHub fixture"), "version": .string("0.1.0"), "protocol_version": .number(1), "executable": .string("provider.sh"), "methods": .array([.string("tasks.comment")]), "task_context_methods": .array([.string("tasks.comment")]), "allowed_requests": .array([.string("task.attach")])])
+        try JSONEncoder().encode(manifest).write(to: package.appendingPathComponent("plugin.json"))
+        let provider = package.appendingPathComponent("provider.sh")
+        try "#!/bin/sh\nprintf 'post\\n' >> \(quote(posts.path))\nprintf '%s\\n' '{\"ok\":false,\"error\":{\"code\":\"PLUGIN_EXTERNAL_RESULT_UNKNOWN\",\"message\":\"The GitHub write may have succeeded. Check octo/app#12 on GitHub before trying again; do not repeat it with a new request ID.\"}}'\n".write(to: provider, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: provider.path)
+        let plugins = PluginStore()
+        _ = await plugins.call("plugin.install", params: ["path": .string(package.path)], configuration: configuration)
+        guard let enabled = await plugins.call("plugin.enable", params: ["id": .string("github")], configuration: configuration), let github = InstalledPlugin(enabled) else { throw Failure(description: plugins.error ?? "GitHub fixture enable failed") }
+        func postCount() -> Int { ((try? String(contentsOf: posts, encoding: .utf8)) ?? "").split(separator: "\n").count }
+        let task = try await currentTask()
+        let operation = GitHubWriteOperation(kind: .comment, taskID: task.id, revision: task.revision, repo: "octo/app", number: 12, configuration: configuration)
+        let first = await plugins.run(github, method: "tasks.comment", params: operation.parameters, configuration: configuration, requestID: operation.requestID)
+        try require(first == nil && plugins.errorCode == "PLUGIN_EXTERNAL_RESULT_UNKNOWN" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage) && postCount() == 1, "Uncertain GitHub write was not reported with its code: \(plugins.errorCode ?? "none") \(plugins.error ?? "")")
+        let retry = await plugins.run(github, method: "tasks.comment", params: operation.parameters, configuration: configuration, requestID: operation.requestID)
+        try require(retry == nil && plugins.errorCode == "PLUGIN_RESULT_UNCERTAIN" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage) && postCount() == 1, "Identical retry ran the provider again or lost the uncertain code: \(plugins.errorCode ?? "none")")
+        _ = try await client.call("task.update", params: ["task_id": .string(taskID), "expected_revision": .number(Double(task.revision)), "title": .string("Report status again")], configuration: configuration)
+        let changed = try await currentTask()
+        try require(changed.revision != task.revision && operation.matches(kind: .comment, task: changed, repo: "Octo/App", number: 12, configuration: configuration), "A task revision change dropped the pending GitHub write")
+        let stale = GitHubWriteOperation(kind: .comment, taskID: taskID, revision: task.revision, repo: "octo/app", number: 12, configuration: configuration)
+        let rejected = await plugins.run(github, method: "tasks.comment", params: stale.parameters, configuration: configuration, requestID: stale.requestID)
+        try require(rejected == nil && plugins.errorCode == "PLUGIN_REVISION_CONFLICT" && !GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage) && postCount() == 1, "Stale revision reached the provider or kept the pending write: \(plugins.errorCode ?? "none")")
+        // The fake provider now reports a posted comment, but linking it fails the way it does for a task deleted during the write.
+        let installedProvider = directory.appendingPathComponent("plugins/github/provider.sh")
+        try "#!/bin/sh\nprintf 'post\\n' >> \(quote(posts.path))\nprintf '%s\\n' '{\"ok\":true,\"result\":{\"commented\":true,\"repo\":\"octo/app\",\"number\":12},\"requests\":[{\"method\":\"task.attach\",\"params\":{\"task_id\":\"deleted-task\",\"path\":\"https://github.com/octo/app/issues/12#issuecomment-7\",\"kind\":\"url\",\"provider\":\"github\",\"locator\":\"octo/app#12\"}}]}'\n".write(to: installedProvider, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: installedProvider.path)
+        let suite = "workboard-github-host-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { throw Failure(description: "No test defaults") }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let linkFailure = GitHubWriteOperation(kind: .comment, taskID: changed.id, revision: changed.revision, repo: "octo/app", number: 12, configuration: configuration)
+        GitHubPendingWrites(defaults: defaults).save(linkFailure)
+        let posted = await plugins.run(github, method: "tasks.comment", params: linkFailure.parameters, configuration: configuration, requestID: linkFailure.requestID)
+        try require(posted == nil && plugins.errorCode == "PLUGIN_ERROR" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage) && postCount() == 2, "A link failure after the GitHub write cleared the pending write: \(plugins.errorCode ?? "none") \(plugins.error ?? "")")
+        // Relaunching restores the same request ID, and the identical retry replays the saved result instead of posting again.
+        guard let reopened = GitHubPendingWrites(defaults: defaults).load(for: configuration.identity()), reopened.requestID == linkFailure.requestID else { throw Failure(description: "The pending write was not restored after the link failure") }
+        let replayed = await plugins.run(github, method: "tasks.comment", params: reopened.parameters, configuration: configuration, requestID: reopened.requestID)
+        try require(replayed == nil && plugins.errorCode == "PLUGIN_ERROR" && GitHubWriteOperation.shouldRetain(afterErrorCode: plugins.errorCode, message: plugins.errorMessage) && postCount() == 2, "The identical retry ran the provider again or cleared the pending write: \(plugins.errorCode ?? "none")")
+        print("✓ GitHub Swift→actual CLI: uncertain writes and link failures after a post keep the request ID, identical retries never post again, restored writes reuse their request ID, and stale revisions clear the pending write")
     }
     static func rpcArgumentsAndErrors() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("workboard ui tests \(UUID().uuidString)")

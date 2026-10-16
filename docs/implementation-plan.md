@@ -15,6 +15,7 @@ The first goal is shared tasks and subtasks across the CLI, Mac app, and native 
 | Slack | Separate package, host/provider and Swift request checks pass. Real workspace authentication/search/sending pending. |
 | Linear | Separate package, host/provider and Swift model checks pass. Real workspace authentication/search/comments/state changes pending. |
 | Orca | Separate package and recoverable launch links implemented; isolated real-runtime worktree import and a harmless terminal launch verified. Actual model calls and new native UI pending. |
+| GitHub | Separate package; mocked provider and actual host/service tests, package verification, and live gh-mode reads on a public repository pass. Real-account writes and native UI interaction pending. |
 | Local distribution | App installation, CLI link, LaunchAgent takeover tested. Developer ID signing/notarization remain separate. |
 | Planning extensions | Dependencies, templates, review checklists, Inbox, saved views, and weekly planning implemented with service and Swift regressions. |
 
