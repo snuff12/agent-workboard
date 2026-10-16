@@ -48,7 +48,9 @@ LIMIT = "GitHub did not respond before the time limit."
 RUNS_UNAVAILABLE = "Check runs are not readable with this token; showing commit statuses only."
 GH_FAILURE = ("Could not read the gh sign-in. Run gh auth login, and check the gh executable path. Sign-ins that exist "
               "only in GH_TOKEN, GITHUB_TOKEN, or GH_CONFIG_DIR are not visible to plugins.")
-STATES = {"todo": "To do", "in_progress": "In progress", "review": "Review", "done": "Done", "blocked": "Blocked"}
+# The board's status names, as the app shows them.
+STATES = {"backlog": "Backlog", "todo": "Todo", "in_progress": "In Progress", "review": "In Review", "done": "Done",
+          "canceled": "Canceled", "blocked": "Blocked"}
 ENTRY_FIELDS = ("type", "title", "state", "state_reason", "draft", "merged", "updated_at", "version", "changed", "checks",
                 "reviews", "requested_reviewers", "checks_unavailable", "reviews_unavailable")
 

@@ -2,6 +2,21 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## Review fixes after the October 16 merges
+
+A review of the merged Orca card links, Linear, GitHub, and trash changes found six issues, fixed together. Each was reproduced before the fix where it could be: another agent's permanent deletion of a trashed task, `codex execpolicy check` allowing `task update --status canceled`, and, in a temporary keychain, `security -i` failing on `O'Brien` and running a second command from a label with a newline.
+
+| Fix | Check |
+| --- | --- |
+| `trash delete`, `trash empty`, and `project delete --with-tasks` apply the live-task ownership rule to trashed tasks, which keep their assignee. | Rust: another agent gets `CLAIM_CONFLICT` for each; the holder and the user without an agent ID still delete. |
+| `task cancel` is its own command, and Codex asks before it. With an agent ID, `task update --status` refuses `done` and `canceled`. | Python: rule decisions with `codex execpolicy check`; refusals, cancel, reopen, and the user's unchanged update path through the CLI. |
+| Slack, Linear, and Google Workspace accept only Keychain account labels `[A-Za-z0-9._@-]{1,80}`, in the plugin before any Keychain command and in the app's settings. GitHub already did. | Python: eight unsafe labels never reach `security`; safe labels do. Swift: the settings refuse unsafe labels for all three plugins. |
+| Linear and GitHub status comments use the board's status names, including Backlog and Canceled. | Python: GitHub layout and labels, Linear comment body. |
+| Linear's suggested state maps Backlog and Canceled to Linear's `backlog` and `canceled` state types. | Swift: suggestions with and without those state types. |
+| The package check verifies the plugin count and the disabled default of every installed package. | `scripts/verify-plugin-packages.sh` with six fresh archives. |
+
+Rust 82, Python 295, the Swift app runner, format, clippy, and the English-only check passed. No real Slack, Linear, Google, or GitHub account and no user Keychain item was used.
+
 ## Linear workflow states, card deletion, and the trash
 
 On October 16, 2026, the board adopted Linear's default workflow (Backlog, Todo, In Progress, In Review, Done, Canceled), and deleting a card now moves it to a Trash with restore, permanent deletion, and Empty Trash. Database version 6 rebuilds the tasks table to widen its status constraint and add the trash columns; the wire and widget formats remain version 1.

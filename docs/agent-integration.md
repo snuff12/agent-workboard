@@ -47,7 +47,9 @@ The installer adds plugins through each tool's plugin manager and leaves `~/.cla
 
 ## Codex sandbox
 
-The Codex sandbox blocks the Unix socket of the board service, so board commands fail inside it. `workboard.rules` runs ordinary board commands outside the sandbox without a prompt: project, task, inbox, template, view, board, events, doctor, and agent commands. The service still validates claims, revisions, and retries. Codex asks the user first for task deletion, completion, and review decisions; project, template, and view deletion; inbox promotion and dismissal; and `rpc`, backup, export, plugin, and serve. The installer repeats the rules for the absolute paths of the installed executable.
+The Codex sandbox blocks the Unix socket of the board service, so board commands fail inside it. `workboard.rules` runs ordinary board commands outside the sandbox without a prompt: project, task, inbox, template, view, board, events, doctor, agent, and trash listing commands. The service still validates claims, revisions, and retries. Codex asks the user first for task deletion, completion, cancellation, and review decisions; trash restore, permanent deletion, and emptying; project, template, and view deletion; inbox promotion and dismissal; and `rpc`, backup, export, plugin, and serve. The installer repeats the rules for the absolute paths of the installed executable.
+
+Rules match commands, not option values, so finishing and canceling have their own commands. With an agent ID, `task update --status` refuses `done` and `canceled` and names `task review`, `task complete`, or `task cancel` instead.
 
 Rules match the command as typed, so agents put options after the subcommand (`workboard task show <id> --json`). Check a command with:
 

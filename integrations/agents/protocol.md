@@ -42,4 +42,4 @@ When the user asks for work based on a Slack message, email, issue, or document,
 
 ## Never
 
-Do not cancel or delete tasks, restore or empty the trash, delete other board data, restore backups, run or change plugins, or edit the board database unless the user explicitly asks.
+Do not cancel or delete tasks, restore or empty the trash, delete other board data, restore backups, run or change plugins, or edit the board database unless the user explicitly asks. When the user asks, cancel with `workboard task cancel <task-id> --expected-revision <revision>`. With an agent ID, `task update --status` cannot set `done` or `canceled`.

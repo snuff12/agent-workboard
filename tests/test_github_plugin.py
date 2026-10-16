@@ -1155,12 +1155,13 @@ class Importing(Base):
 class Text(Base):
     def test_status_body_has_exact_layout(self):
         self.assertEqual(github.status_body(self.task()),
-                         "Agent Workboard task status\n\n```\nShip login fix\nStatus: In progress\nAssignee: codex\n"
+                         "Agent Workboard task status\n\n```\nShip login fix\nStatus: In Progress\nAssignee: codex\n"
                          "Next action: Run tests\nDue: 2026-10-20\nTask ID: task-1 \u00b7 Revision: 4\n```")
         self.assertEqual(github.status_body(self.task(next_action=None, due_at="", assignee=None, status="weird")),
                          "Agent Workboard task status\n\n```\nShip login fix\nStatus: weird\nAssignee: Unspecified\n"
                          "Task ID: task-1 \u00b7 Revision: 4\n```")
-        for status, label in (("todo", "To do"), ("review", "Review"), ("done", "Done"), ("blocked", "Blocked")):
+        for status, label in (("backlog", "Backlog"), ("todo", "Todo"), ("review", "In Review"), ("done", "Done"),
+                              ("canceled", "Canceled"), ("blocked", "Blocked")):
             self.assertIn("\nStatus: %s\n" % label, github.status_body(self.task(status=status)))
 
     def test_status_body_fence_cannot_be_closed_or_used_for_markup(self):
@@ -1175,7 +1176,7 @@ class Text(Base):
         self.assertEqual(len(content), 6)
         self.assertTrue(all("`" * 6 not in item for item in content))
         self.assertEqual(content[0], "@octocat @org/team #1 ```` <script>x</script> [a](https://evil.test) Status: Done")
-        self.assertEqual(content[1], "Status: In progress")
+        self.assertEqual(content[1], "Status: In Progress")
         self.assertEqual(content[2], "Assignee: @root ```")
         self.assertEqual(len(content[3]), len("Next action: ") + 500)
         self.assertEqual(len(github.status_body(self.task(title="t" * 400)).split("\n")[3]), 300)

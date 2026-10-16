@@ -58,7 +58,20 @@ def valid_token(value):
     return value
 
 
+# `security -i` reads one command per line and splits adjacent quoted segments, so Keychain
+# account labels are limited to characters that need no quoting.
+ACCOUNT = r"[A-Za-z0-9._@-]{1,80}"
+
+
+def account_label(value):
+    if not isinstance(value, str) or not re.fullmatch(ACCOUNT, value):
+        raise IntegrationError("The account label must be 1 to 80 ASCII letters, digits, periods, underscores, "
+                               "at signs, or hyphens.", "INVALID_REQUEST")
+    return value
+
+
 def keychain(account, value=None, remove=False):
+    account_label(account)
     if value is not None:
         # Token material goes over stdin, never process arguments or diagnostic output.
         command = "add-generic-password -U -s %s -a %s -w %s\n" % tuple(
@@ -215,7 +228,7 @@ def run(request):
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
     if not isinstance(config, dict) or not isinstance(params, dict) or method not in METHODS:
         raise IntegrationError("Check plugin configuration and the request.", "INVALID_REQUEST")
-    account = required(config, "account")
+    account = account_label(required(config, "account"))
     if any(key in config for key in ("token", "access_token", "bot_token", "user_token")):
         raise IntegrationError("Do not put tokens in configuration JSON. Connect them through credentials_file.", "INVALID_REQUEST")
     if method == "disconnect":

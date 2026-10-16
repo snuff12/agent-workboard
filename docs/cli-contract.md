@@ -23,6 +23,7 @@ workboard task resume-context <task-id> --json
 workboard task heartbeat <task-id> --json
 workboard task pause <task-id> --run <run-id> --summary <state> --next-action <action> --json
 workboard task release <task-id> --json
+workboard task cancel <task-id> --expected-revision <revision> --json
 workboard agent context --json
 workboard agent brief
 workboard events --after <sequence> --json
@@ -45,7 +46,7 @@ Task statuses follow Linear's default workflow: `backlog`, `todo`, `in_progress`
 
 - New tasks start in `todo`. `task add`, `template apply`, and `inbox promote` accept `--status backlog` or `--status todo`; other initial statuses return `INVALID_PARAMS`. Runs, reviews, and outcomes move tasks forward.
 - Backlog tasks are never `ready`, so `task ready` and `agent context` skip them until someone moves them to Todo. Starting a Backlog task directly is allowed.
-- `task update --status canceled` ends a running run as interrupted and keeps the assignee. A canceled task rejects `claim` and `start` with `INVALID_STATE` until it is updated back to `backlog` or `todo`. Canceling needs no completion summary.
+- `task update --status canceled`, or `task cancel`, ends a running run as interrupted and keeps the assignee. With an agent ID from `WORKBOARD_AGENT` or `CODEX_THREAD_ID`, `task update --status` refuses `done` and `canceled` with `INVALID_PARAMS`; agents use `task review`, `task complete`, or `task cancel`, which the Codex rules ask the user to approve. A canceled task rejects `claim` and `start` with `INVALID_STATE` until it is updated back to `backlog` or `todo`. Canceling needs no completion summary.
 - Done and Canceled close a task. Closed prerequisites leave `blocked_by`, schedule previews ignore closed tasks, and `task show` reports `canceled_child_count` beside `child_count` and `completed_child_count`.
 - Database version 6 adds Backlog and Canceled. The service upgrades an older board when it opens it and restores older backups through a private upgraded copy. Earlier service versions cannot open a version 6 board.
 
@@ -61,6 +62,7 @@ A trashed task keeps its runs, artifacts, checklist, review history, dependency 
 - `trash restore <task-id>` restores that deletion with its subtasks. A subtask deleted with its parent is restored through the parent (`INVALID_STATE`). A task whose parent is still in the trash waits for the parent (`INVALID_STATE`).
 - `trash delete <task-id>` deletes that entry permanently, including subtasks that were moved to the trash earlier on their own.
 - `trash empty` deletes everything in the trash permanently.
+- A trashed task keeps its assignee. With an agent ID, `trash delete`, `trash empty`, and `project delete --with-tasks` return `CLAIM_CONFLICT` when they include a trashed or live task held by another agent, as `task delete` does for live tasks. Without an agent ID, the user can delete anything.
 
 Permanent deletion removes tasks, runs, artifact links, and checklist/review/dependency references, and keeps them in the `task.purged` or `trash.emptied` event. Surviving dependents lose the removed prerequisite and receive new revisions. Inbox source/note/processed state are preserved; only the deleted task link is cleared. Reconversion does not recreate deleted work automatically. Revision tombstones never regress across restore/retry. Nothing leaves the trash automatically.
 

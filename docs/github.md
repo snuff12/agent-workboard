@@ -157,7 +157,7 @@ Agent Workboard task status
 
 ```
 Fix login timeout
-Status: In progress
+Status: In Progress
 Assignee: Unspecified
 Next action: Add a retry test
 Task ID: TASK_ID · Revision: 3

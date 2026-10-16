@@ -99,7 +99,20 @@ def valid_key(value):
     return value
 
 
+# `security -i` reads one command per line and splits adjacent quoted segments, so Keychain
+# account labels are limited to characters that need no quoting.
+ACCOUNT = r"[A-Za-z0-9._@-]{1,80}"
+
+
+def account_label(value):
+    if not isinstance(value, str) or not re.fullmatch(ACCOUNT, value):
+        raise IntegrationError("The account label must be 1 to 80 ASCII letters, digits, periods, underscores, "
+                               "at signs, or hyphens.", "INVALID_REQUEST")
+    return value
+
+
 def keychain(account, value=None, remove=False):
+    account_label(account)
     if value is not None:
         # Key material goes over stdin, never process arguments or diagnostic output.
         command = "add-generic-password -U -s %s -a %s -w %s\n" % tuple(
@@ -349,7 +362,9 @@ def markdown_text(value, limit):
 
 
 def status_body(task):
-    states = {"todo": "To do", "in_progress": "In progress", "review": "Review", "done": "Done"}
+    # The board's status names, as the app shows them.
+    states = {"backlog": "Backlog", "todo": "Todo", "in_progress": "In Progress", "review": "In Review", "done": "Done",
+              "canceled": "Canceled", "blocked": "Blocked"}
     # Only selected status fields leave the board; goals, artifacts and evidence remain local.
     lines = ["**Agent Workboard · Task status**", "", "- Title: " + markdown_text(task.get("title", ""), 300),
              "- Status: " + markdown_text(states.get(task.get("status"), task.get("status", "")), 40)]
@@ -440,7 +455,7 @@ def run(request):
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
     if not isinstance(config, dict) or not isinstance(params, dict) or method not in METHODS:
         raise IntegrationError("Check plugin configuration and the request.", "INVALID_REQUEST")
-    account = required(config, "account")
+    account = account_label(required(config, "account"))
     if any(name in config for name in ("api_key", "key", "token", "access_token")):
         raise IntegrationError("Do not put API keys in configuration JSON. Connect them through credentials_file.", "INVALID_REQUEST")
     if method == "disconnect":

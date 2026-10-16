@@ -369,7 +369,7 @@ class LinearPlugin(unittest.TestCase):
         self.assertEqual(mutation["variables"]["input"]["issueId"], ISSUE_ID)
         self.assertEqual(mutation["variables"]["input"]["id"], bodies[1]["variables"]["input"]["id"])
         self.assertEqual(str(linear.uuid.UUID(mutation["variables"]["input"]["id"]).version), "4")
-        self.assertIn("- Status: Review", body)
+        self.assertIn("- Status: In Review", body)
         self.assertNotIn("Blocked", body)
         self.assertIn("\\[login\\]\\(https\\:", body)
         self.assertIn("\\@team", body)

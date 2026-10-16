@@ -131,11 +131,19 @@ struct PluginConfigurationDraft {
     var advancedJSON: String
     /// Configuration keys that must never hold a GitHub token; saving writes them as null.
     static let githubSecretKeys: Set<String> = ["token", "access_token", "github_token", "gh_token", "pat", "password", "secret", "authorization"]
-    /// The Keychain account label for a GitHub token: ASCII `[A-Za-z0-9._@-]`, 1 to 80 characters.
-    static func isValidGitHubAccount(_ value: String) -> Bool {
+    /// A Keychain account label: ASCII `[A-Za-z0-9._@-]`, 1 to 80 characters. Plugins store keys with
+    /// `security -i`, which cannot take other labels safely, and refuse them too.
+    static func isValidKeychainAccount(_ value: String) -> Bool {
         (1...80).contains(value.unicodeScalars.count) && value.unicodeScalars.allSatisfy { scalar in
             ("a"..."z").contains(scalar) || ("A"..."Z").contains(scalar) || ("0"..."9").contains(scalar) || "._@-".unicodeScalars.contains(scalar)
         }
+    }
+    static func isValidGitHubAccount(_ value: String) -> Bool { isValidKeychainAccount(value) }
+    static let accountLabelRule = "Write the account label with 1 to 80 ASCII letters, digits, periods, underscores, hyphens, or @, without spaces."
+    private func keychainAccount() throws -> JSONValue {
+        let label = account.isEmpty ? "default" : account
+        guard Self.isValidKeychainAccount(label) else { throw WorkboardError(message: Self.accountLabelRule) }
+        return .string(label)
     }
 
     init(config: JSONValue, defaultsForNewInstall: Bool = false) {
@@ -201,17 +209,17 @@ struct PluginConfigurationDraft {
             config["executable"] = .string(executable)
             if selectors != savedOrcaRepos { config["repos"] = .array(selectors.map(JSONValue.string)); config.removeValue(forKey: "repo") }
         } else if pluginID == "gmail" || pluginID == "google-workspace" {
-            config["account"] = .string(account.isEmpty ? "default" : account)
+            config["account"] = try keychainAccount()
             if !credentialsFile.isEmpty { config["credentials_file"] = .string(credentialsFile) }
             if pluginID == "google-workspace" { config["calendar_enabled"] = .bool(calendarEnabled); config["gmail_enabled"] = .bool(gmailEnabled) }
         } else if pluginID == "slack" {
-            config["account"] = .string(account.isEmpty ? "default" : account)
+            config["account"] = try keychainAccount()
             config["credentials_file"] = .string(credentialsFile)
             config["team_id"] = .string(slackTeamID.trimmingCharacters(in: .whitespacesAndNewlines))
             config["messages_enabled"] = .bool(slackMessagesEnabled)
             config["send_enabled"] = .bool(slackSendEnabled)
         } else if pluginID == "linear" {
-            config["account"] = .string(account.isEmpty ? "default" : account)
+            config["account"] = try keychainAccount()
             config["credentials_file"] = .string(credentialsFile)
             config["workspace"] = .string(linearWorkspace.trimmingCharacters(in: .whitespacesAndNewlines))
             config["issues_enabled"] = .bool(linearIssuesEnabled)
@@ -228,7 +236,7 @@ struct PluginConfigurationDraft {
             if githubAuth == "gh" { config["gh_executable"] = .string(githubExecutable) }
             else {
                 guard Self.isValidGitHubAccount(account.isEmpty ? "default" : account) else {
-                    throw WorkboardError(message: "Write the account label with 1 to 80 ASCII letters, digits, periods, underscores, hyphens, or @, without spaces.")
+                    throw WorkboardError(message: Self.accountLabelRule)
                 }
                 config["credentials_file"] = .string(credentialsFile)
                 if original["account"] != nil || !(account.isEmpty || account == "default") { config["account"] = .string(account.isEmpty ? "default" : account) }
