@@ -6,7 +6,8 @@ ARCHIVE_DIR="${2:-${REPO_DIR}/dist}"
 [[ -x "$CLI" ]] || { echo 'The workboard CLI executable to verify is missing.' >&2; exit 1; }
 VERIFY_DIR="$(mktemp -d /tmp/awb-plugin-packages.XXXXXX)"
 trap 'rm -rf "$VERIFY_DIR"' EXIT
-for plugin in agent-memory google-workspace slack linear orca github; do
+PLUGINS=(agent-memory google-workspace slack linear orca github)
+for plugin in "${PLUGINS[@]}"; do
     VERSION="$(plutil -extract version raw -o - "${REPO_DIR}/plugins/${plugin}/plugin.json")"
     PACKAGE="${plugin}-${VERSION}"
     ARCHIVE="${ARCHIVE_DIR}/AgentWorkboard-plugin-${PACKAGE}.zip"
@@ -25,10 +26,9 @@ for plugin in agent-memory google-workspace slack linear orca github; do
     echo "Extraction, CLI installation, and disabled default verified: ${PACKAGE}"
 done
 "$CLI" --json --data-dir "${VERIFY_DIR}/data" --socket "${VERIFY_DIR}/s.sock" plugin list >"${VERIFY_DIR}/plugins.json"
-[[ "$(plutil -extract result.plugins.0.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
-[[ "$(plutil -extract result.plugins.1.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
-[[ "$(plutil -extract result.plugins.2.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
-[[ "$(plutil -extract result.plugins.3.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
-[[ "$(plutil -extract result.plugins.4.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
+[[ "$(plutil -extract result.plugins raw -o - "${VERIFY_DIR}/plugins.json")" == "${#PLUGINS[@]}" ]] || { echo 'The plugin list does not match the installed packages.' >&2; exit 1; }
+for index in "${!PLUGINS[@]}"; do
+    [[ "$(plutil -extract "result.plugins.${index}.enabled" raw -o - "${VERIFY_DIR}/plugins.json")" == false ]] || { echo 'An installed plugin is enabled by default.' >&2; exit 1; }
+done
 [[ ! -S "${VERIFY_DIR}/s.sock" ]] || { echo 'The installation and disabled-state check started the core task service.' >&2; exit 1; }
 echo 'Separate plugin ZIP checks passed without calling external accounts, amem, or Orca.'

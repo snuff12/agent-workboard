@@ -49,6 +49,8 @@ class Kit(unittest.TestCase):
             "workboard inbox capture --title follow-up": "allow",
             "workboard task complete TASK --summary done": "prompt",
             "workboard task delete TASK": "prompt",
+            "workboard task cancel TASK": "prompt",
+            "workboard trash empty": "prompt",
             "workboard trash list": "allow",
             "workboard trash restore TASK": "prompt",
             "workboard trash delete TASK": "prompt",
@@ -149,6 +151,26 @@ class AgentSessions(unittest.TestCase):
                             "--expected-revision", item["revision"])
         sources = [a["path"] for a in self.cli("task", "show", promoted["task"]["id"])["artifacts"]]
         self.assertEqual(sources, [link], "promoting an inbox item keeps the source link")
+
+    def test_agents_finish_and_cancel_only_through_their_own_commands(self):
+        project = self.cli("project", "add", "--name", "App", "--directory", self.main)["project_id"]
+        first = self.cli("task", "add", "--project", project, "--title", "First")["task"]["id"]
+        second = self.cli("task", "add", "--project", project, "--title", "Second")["task"]["id"]
+        for status in ("canceled", "done"):
+            refused = self.cli("task", "update", first, "--status", status, "--completion-summary", "x",
+                               agent="codex:cccc3333", ok=False)
+            self.assertEqual(refused["code"], "INVALID_PARAMS", "update --status cannot slip past the Codex prompt rules")
+            self.assertIn("task cancel", refused["message"])
+        self.assertEqual(self.cli("task", "show", first)["task"]["status"], "todo")
+        revision = self.cli("task", "show", first)["task"]["revision"]
+        canceled = self.cli("task", "cancel", first, "--expected-revision", revision, agent="codex:cccc3333")["task"]
+        self.assertEqual(canceled["status"], "canceled")
+        reopened = self.cli("task", "update", first, "--status", "todo", "--expected-revision", canceled["revision"],
+                            agent="codex:cccc3333")["task"]
+        self.assertEqual(reopened["status"], "todo", "other status changes stay available to agents")
+        revision = self.cli("task", "show", second)["task"]["revision"]
+        user = self.cli("task", "update", second, "--status", "canceled", "--expected-revision", revision)["task"]
+        self.assertEqual(user["status"], "canceled", "people without an agent ID keep the update path")
 
     def test_hooks_add_context_set_identity_and_fail_open(self):
         project = self.cli("project", "add", "--name", "App", "--directory", self.main)["project_id"]

@@ -191,6 +191,8 @@ pub(super) fn mutate(c: &Transaction<'_>, r: &Request) -> Result<Option<Value>, 
                     "A subtask of this task is not in the trash",
                 ));
             }
+            // Permanent deletion keeps the rule for live tasks: an agent removes only work it holds or nobody holds.
+            check_owners(&tasks, &optional(p, "agent_id")?)?;
             let deleted: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
             let removed = delete_tasks(c, &tasks)?;
             let seq = record(
@@ -204,6 +206,7 @@ pub(super) fn mutate(c: &Transaction<'_>, r: &Request) -> Result<Option<Value>, 
         }
         "trash.empty" => {
             let tasks = trashed_tasks(c, None)?;
+            check_owners(&tasks, &optional(p, "agent_id")?)?;
             let deleted: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
             if tasks.is_empty() {
                 return Ok(Some(

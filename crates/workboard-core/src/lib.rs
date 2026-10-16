@@ -1476,9 +1476,9 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
                 },
             ));
         }
-        check_owners(&tasks, &optional(p, "agent_id")?)?;
-        // Deleting a project is permanent, including tasks already in the trash.
+        // Deleting a project is permanent, including tasks already in the trash, so check both.
         let tasks: Vec<Task> = tasks.into_iter().chain(trashed).collect();
+        check_owners(&tasks, &optional(p, "agent_id")?)?;
         let deleted: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         let removed = delete_tasks(c, &tasks)?;
         c.execute("DELETE FROM projects WHERE id=?1", [project_id])?;

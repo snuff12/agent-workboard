@@ -239,6 +239,12 @@ enum TaskCommand {
         #[arg(long)]
         agent: Option<String>,
     },
+    #[command(
+        about = "Cancel a task and interrupt its running run. Reopen it with `task update --status todo`"
+    )]
+    Cancel {
+        task_id: String,
+    },
     #[command(about = "Release a task you hold and interrupt its running run")]
     Release {
         task_id: String,
@@ -784,24 +790,44 @@ fn main() {
                 scheduled_start,
                 scheduled_end,
                 time_zone,
-            } => (
+            } => {
+                // Agents finish and cancel through their own commands so Codex rules can ask the user first.
+                if matches!(status.as_deref(), Some("done" | "canceled"))
+                    && agent::identity().is_some()
+                {
+                    output(
+                        &failure(
+                            &request_id,
+                            "INVALID_PARAMS",
+                            "With an agent ID, use `workboard task review` or `workboard task complete` to finish and `workboard task cancel` to cancel, not `task update --status`.",
+                        ),
+                        cli.json,
+                    );
+                    std::process::exit(2)
+                }
+                (
+                    "task.update".into(),
+                    params_object(vec![
+                        ("task_id", Some(json!(task_id))),
+                        ("title", string(title)),
+                        ("goal", string(goal)),
+                        ("completion_criteria", string(completion_criteria)),
+                        ("status", string(status)),
+                        ("priority", priority.map(Value::from)),
+                        ("next_action", string(next_action)),
+                        ("blocked_reason", string(blocked_reason)),
+                        ("completion_summary", string(completion_summary)),
+                        ("parent_id", string(parent)),
+                        ("due_at", string(due_at)),
+                        ("scheduled_start", string(scheduled_start)),
+                        ("scheduled_end", string(scheduled_end)),
+                        ("time_zone", string(time_zone)),
+                    ]),
+                )
+            }
+            TaskCommand::Cancel { task_id } => (
                 "task.update".into(),
-                params_object(vec![
-                    ("task_id", Some(json!(task_id))),
-                    ("title", string(title)),
-                    ("goal", string(goal)),
-                    ("completion_criteria", string(completion_criteria)),
-                    ("status", string(status)),
-                    ("priority", priority.map(Value::from)),
-                    ("next_action", string(next_action)),
-                    ("blocked_reason", string(blocked_reason)),
-                    ("completion_summary", string(completion_summary)),
-                    ("parent_id", string(parent)),
-                    ("due_at", string(due_at)),
-                    ("scheduled_start", string(scheduled_start)),
-                    ("scheduled_end", string(scheduled_end)),
-                    ("time_zone", string(time_zone)),
-                ]),
+                json!({"task_id":task_id,"status":"canceled"}),
             ),
             TaskCommand::Claim { task_id, agent } => (
                 "task.claim".into(),

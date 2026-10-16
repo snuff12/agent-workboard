@@ -394,7 +394,7 @@ class GitHubHost(unittest.TestCase):
         self.assertEqual([post["path"] for post in posts], ["/repos/octo/widgets/issues/12/comments"])
         body = posts[0]["body"]["body"]
         self.assertEqual(body, preview["body"])
-        for expected in ("Agent Workboard task status", "Original board task", "Status: To do", "Assignee: Unspecified",
+        for expected in ("Agent Workboard task status", "Original board task", "Status: Todo", "Assignee: Unspecified",
                          "Next action: Ship the login fix", "Task ID: " + task["id"]):
             self.assertIn(expected, body)
         self.assertNotIn("FORGED", body)

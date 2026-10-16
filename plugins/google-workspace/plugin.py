@@ -57,7 +57,20 @@ def scopes(config):
     return selected
 
 
+# `security -i` reads one command per line and splits adjacent quoted segments, so Keychain
+# account labels are limited to characters that need no quoting.
+ACCOUNT = r"[A-Za-z0-9._@-]{1,80}"
+
+
+def account_label(value):
+    if not isinstance(value, str) or not re.fullmatch(ACCOUNT, value):
+        raise IntegrationError("The account label must be 1 to 80 ASCII letters, digits, periods, underscores, "
+                               "at signs, or hyphens.", "INVALID_REQUEST")
+    return value
+
+
 def keychain(account, token=None, remove=False):
+    account_label(account)
     if token is not None:
         # Send token material over stdin, never process arguments or stdout.
         line = "add-generic-password -U -s %s -a %s -w %s\n" % tuple(
@@ -473,7 +486,7 @@ def run(request):
     config, params, method = request.get("config", {}), request.get("params", {}), request.get("method")
     if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("config and params must be JSON objects.", "INVALID_REQUEST")
-    account = str(config.get("account", "default"))
+    account = account_label(str(config.get("account", "default")))
     if method == "disconnect":
         keychain(account, remove=True)
         return {"ok": True, "result": {"connected": False}}

@@ -9,9 +9,9 @@ prefix_rule(
     match = [["workboard", "task", "show", "TASK", "--json"], ["workboard", "agent", "context"]],
 )
 prefix_rule(
-    pattern = ["workboard", "task", ["delete", "complete", "decide"]],
+    pattern = ["workboard", "task", ["delete", "complete", "decide", "cancel"]],
     decision = "prompt",
-    justification = "Deleting work, completing tasks, and deciding reviews belong to the user.",
+    justification = "Deleting, completing, and canceling tasks and deciding reviews belong to the user.",
 )
 prefix_rule(
     pattern = ["workboard", "trash", ["restore", "delete", "empty"]],

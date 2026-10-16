@@ -206,6 +206,15 @@ import Darwin
         try require(orcaEdited["repos"] == .array([.string("id:repo-1"), .string("path:/new/repo"), .string("path:/board/app")]) && orcaEdited["repo"] == .null && orcaEdited["agent_commands"] == orcaSaved["agent_commands"], "Orca repository edit lost saved options or repositories")
         orcaDraft.orcaRepos = "id:repo-1\n/no/prefix"
         try require((try? orcaDraft.enableParameters(for: "orca")) == nil, "Orca accepted a repository without a selector prefix")
+        for pluginID in ["slack", "linear", "google-workspace"] {
+            for label in ["O'Brien", "work\nlist-keychains", "two words"] {
+                var unsafe = PluginConfigurationDraft(config: .object(["credentials_file": .string("/keys/key.json")])); unsafe.account = label
+                try require((try? unsafe.enableParameters(for: pluginID)) == nil, "\(pluginID) saved a Keychain account label that `security -i` cannot store safely: \(label)")
+            }
+            var safe = PluginConfigurationDraft(config: .object(["credentials_file": .string("/keys/key.json")])); safe.account = "work-mail@example.com"
+            let saved = try safe.enableParameters(for: pluginID)
+            try require(saved["config"]?["account"].string == "work-mail@example.com", "\(pluginID) refused a valid account label")
+        }
         let slackSaved: JSONValue = .object(["account": .string("work-slack"), "team_id": .string("T123"), "credentials_file": .string("/custom/slack.credentials.json"), "messages_enabled": .bool(true), "send_enabled": .bool(false), "future_option": .string("keep")])
         var slackDraft = PluginConfigurationDraft(config: slackSaved)
         try require(slackDraft.slackMessagesEnabled && !slackDraft.slackSendEnabled, "Slack sending was enabled without an explicit setting")
@@ -262,6 +271,13 @@ import Darwin
         try require(LinearIssue.suggestedState(for: "in_progress", in: issue.teamStates)?.id == "s-progress" && LinearIssue.suggestedState(for: "review", in: issue.teamStates)?.id == "s-progress", "Active work did not suggest a started state")
         try require(LinearIssue.suggestedState(for: "done", in: issue.teamStates)?.id == "s-done", "Done did not suggest a completed state")
         try require(LinearIssue.suggestedState(for: "blocked", in: issue.teamStates) == nil && LinearIssue.suggestedState(for: "done", in: []) == nil, "Blocked work or a team without states suggested a state")
+        try require(LinearIssue.suggestedState(for: "backlog", in: issue.teamStates) == nil && LinearIssue.suggestedState(for: "canceled", in: issue.teamStates) == nil, "A team without backlog or canceled states suggested another type")
+        let closing = issue.teamStates + [
+            .object(["id": .string("s-backlog"), "name": .string("Backlog"), "type": .string("backlog"), "position": .number(0)]),
+            .object(["id": .string("s-canceled"), "name": .string("Canceled"), "type": .string("canceled"), "position": .number(4)]),
+            .object(["id": .string("s-duplicate"), "name": .string("Duplicate"), "type": .string("canceled"), "position": .number(6)])
+        ].compactMap(LinearState.init)
+        try require(LinearIssue.suggestedState(for: "backlog", in: closing)?.id == "s-backlog" && LinearIssue.suggestedState(for: "canceled", in: closing)?.id == "s-canceled", "Backlog or Canceled did not suggest the matching Linear state")
         guard let task = BoardTask(.object(["id": .string("task-1"), "project_id": .string("project-1"), "revision": .number(4)])) else { throw Failure(description: "Board task did not decode") }
         let comment = issue.writeParameters(task: task)
         try require(comment["task_id"] == .string("task-1") && comment["expected_revision"] == .number(4) && comment["confirmed_by_user"] == .bool(true) && comment["workspace"] == json["workspace"], "Linear comment lost the host task or confirmation")

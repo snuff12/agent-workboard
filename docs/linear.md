@@ -34,6 +34,8 @@ workboard plugin run linear authorize
 workboard plugin check linear
 ```
 
+The account label names the Keychain item. Use 1 to 80 ASCII letters, digits, periods, underscores, at signs, or hyphens; the plugin and the app refuse other labels before touching Keychain.
+
 Build `dist/AgentWorkboard-plugin-linear-0.1.0.zip` with `scripts/package-plugins.sh`. Extract and select `linear-0.1.0` in the app/CLI, not the ZIP itself.
 
 Installation leaves the plugin disabled. `issues_enabled`, `comments_enabled`, and `state_changes_enabled` require Boolean `true`, not `"true"` or `1`. Comments and state changes also require issue reading.
@@ -48,7 +50,7 @@ Selecting an issue rereads its source. With a board task selected, attach the is
 
 To post status, enable **Post selected task status as Linear comments**. Select a board task and an issue, expand **Post selected task status to Linear**, and choose **Post status comment**. A blocked task reports its blocked reason, or the number of unfinished prerequisites, on its own line. Goals and artifact/evidence bodies are not sent. Board text is escaped so it cannot add links, mentions, or formatting.
 
-To change state, enable **Change Linear issue state from the board**. Select a board task and an issue, expand **Change Linear issue state**, pick a state, and choose **Change state in Linear**. The picker suggests a state from the board status: To do → unstarted, In progress/Review → started, Done → completed.
+To change state, enable **Change Linear issue state from the board**. Select a board task and an issue, expand **Change Linear issue state**, pick a state, and choose **Change state in Linear**. The picker suggests a state from the board status: Backlog → backlog, Todo → unstarted, In Progress/In Review → started, Done → completed, Canceled → canceled.
 
 Each click uses a new request ID, which is safe for both writes. Posting the same task revision again finds the existing comment instead of creating another. After a failed state change, the screen reads the issue again and keeps the error visible, so the next attempt starts from the issue's current state; a change that already reached Linear shows as the current state. Connection changes invalidate old requests and delayed responses.
 

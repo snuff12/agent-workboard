@@ -67,7 +67,8 @@ struct LinearIssue: Identifiable {
         return values
     }
     static func suggestedState(for boardStatus: String, in states: [LinearState]) -> LinearState? {
-        let type: String? = switch boardStatus { case "todo": "unstarted"; case "in_progress", "review": "started"; case "done": "completed"; default: nil }
+        // Board statuses follow Linear's default workflow, so each maps to a Linear state type.
+        let type: String? = switch boardStatus { case "backlog": "backlog"; case "todo": "unstarted"; case "in_progress", "review": "started"; case "done": "completed"; case "canceled": "canceled"; default: nil }
         guard let type else { return nil }
         return states.filter { $0.type == type }.min { $0.position < $1.position }
     }

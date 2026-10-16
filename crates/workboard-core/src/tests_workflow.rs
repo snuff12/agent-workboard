@@ -1448,6 +1448,66 @@ fn child(b: &mut Board, p: &str, parent: &str, title: &str) -> String {
 }
 
 #[test]
+fn permanent_deletion_of_trashed_work_respects_the_holder() {
+    let (_dir, mut b, p, root) = setup();
+    let held = child(&mut b, &p, &root, "Held by agent a");
+    call(&mut b, "task.claim", json!({"task_id":held,"agent_id":"a"}));
+    // The holder moves its own work to the trash; the task keeps its assignee there.
+    call(
+        &mut b,
+        "task.delete",
+        json!({"task_id":held,"agent_id":"a"}),
+    );
+    error(
+        &mut b,
+        "trash.purge",
+        json!({"task_id":held,"agent_id":"b"}),
+        "CLAIM_CONFLICT",
+    );
+    error(
+        &mut b,
+        "trash.empty",
+        json!({"agent_id":"b"}),
+        "CLAIM_CONFLICT",
+    );
+    error(
+        &mut b,
+        "project.delete",
+        json!({"project_id":p,"with_tasks":true,"agent_id":"b"}),
+        "CLAIM_CONFLICT",
+    );
+    assert_eq!(
+        call(&mut b, "trash.list", json!({}))["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    // The holder and the user, who names no agent, can still delete it permanently.
+    call(
+        &mut b,
+        "trash.purge",
+        json!({"task_id":held,"agent_id":"a"}),
+    );
+    let other = child(&mut b, &p, &root, "Also held by agent a");
+    call(
+        &mut b,
+        "task.claim",
+        json!({"task_id":other,"agent_id":"a"}),
+    );
+    call(
+        &mut b,
+        "task.delete",
+        json!({"task_id":other,"agent_id":"a"}),
+    );
+    call(&mut b, "trash.empty", json!({}));
+    assert!(call(&mut b, "trash.list", json!({}))["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn trash_restores_whole_deletions_and_needs_a_live_parent() {
     let (_dir, mut b, p, root) = setup();
     let kept = child(&mut b, &p, &root, "Deleted with the parent");

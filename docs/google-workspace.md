@@ -34,6 +34,8 @@ workboard plugin run google-workspace authorize
 workboard plugin check google-workspace
 ```
 
+The account label names the Keychain item. Use 1 to 80 ASCII letters, digits, periods, underscores, at signs, or hyphens; the plugin and the app refuse other labels before touching Keychain.
+
 New installations are disabled. Services require literal JSON `true`, not the string `"true"`. Calendar-only configuration requests no Gmail scopes and calls no Gmail API. Enabling Gmail later requires `authorize` again with the new scopes.
 
 | Service | OAuth scopes |
