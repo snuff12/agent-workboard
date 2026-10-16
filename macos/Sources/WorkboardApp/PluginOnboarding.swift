@@ -22,11 +22,17 @@ struct PluginDiscovery {
         settings = saved.object.merging(json["config"].object) { _, detected in detected }
         repositories = json["repositories"].array.compactMap(DetectedRepository.init)
     }
-    func configuration(pluginID: String, repository: String, calendar: Bool, gmail: Bool) throws -> [String: JSONValue] {
+    /// Detected repositories that discovery preselected. Discovery already resolves saved selectors to `id:` entries.
+    var selectedRepositories: Set<String> {
+        Set((settings["repos"]?.array ?? []).compactMap(\.string)).intersection(repositories.map { "id:" + $0.id })
+    }
+    func configuration(pluginID: String, repositories selection: Set<String>, calendar: Bool, gmail: Bool) throws -> [String: JSONValue] {
         var result = settings
         if pluginID == "orca" {
-            guard repositories.contains(where: { "id:" + $0.id == repository }) else { throw WorkboardError(message: "Choose a repository to connect.") }
-            result["repo"] = .string(repository)
+            let chosen = repositories.map { "id:" + $0.id }.filter(selection.contains)
+            guard !chosen.isEmpty, chosen.count == selection.count else { throw WorkboardError(message: "Choose the repositories to connect.") }
+            result["repos"] = .array(chosen.map(JSONValue.string))
+            result.removeValue(forKey: "repo")
         } else if pluginID == "google-workspace" {
             guard calendar || gmail else { throw WorkboardError(message: "Choose Calendar, Gmail, or both.") }
             result["calendar_enabled"] = .bool(calendar); result["gmail_enabled"] = .bool(gmail)
@@ -43,7 +49,7 @@ struct PluginDiscovery {
     @ObservedObject var plugins: PluginStore
     var openAdvanced: () -> Void
     @State private var discovery: PluginDiscovery?
-    @State private var repository = ""
+    @State private var repositories: Set<String> = []
     @State private var calendar = true
     @State private var gmail = false
     @State private var slackToken = ""
@@ -53,7 +59,7 @@ struct PluginDiscovery {
     @State private var connecting = false
 
     private var ready: Bool {
-        discovery?.available == true && (plugin.id != "orca" || !repository.isEmpty)
+        discovery?.available == true && (plugin.id != "orca" || !repositories.isEmpty)
         && (plugin.id != "google-workspace" || calendar || gmail)
         && (plugin.id != "slack" || !slackToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
@@ -69,14 +75,16 @@ struct PluginDiscovery {
                     Toggle("Gmail — read and attach messages", isOn: $gmail)
                     Text("Tokens stay in macOS Keychain. Gmail is optional.").font(.caption).foregroundStyle(.secondary)
                 } else if plugin.id == "orca", !discovery.repositories.isEmpty {
-                    Text("Orca was found on this Mac.").foregroundStyle(.secondary)
-                    Picker("Repository", selection: $repository) {
-                        Text("Choose a repository").tag("")
-                        ForEach(discovery.repositories) { item in Text(item.name).tag("id:" + item.id) }
-                    }
-                    if let selected = discovery.repositories.first(where: { "id:" + $0.id == repository }) {
-                        Text(selected.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
+                    Text("Orca was found on this Mac. Choose the repositories to connect. Repositories at board project folders are selected.").foregroundStyle(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(discovery.repositories) { item in
+                                Toggle(isOn: Binding(get: { repositories.contains("id:" + item.id) }, set: { if $0 { repositories.insert("id:" + item.id) } else { repositories.remove("id:" + item.id) } })) {
+                                    VStack(alignment: .leading, spacing: 2) { Text(item.name); Text(item.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                                }
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(maxHeight: 180)
                 } else if plugin.id == "slack" {
                     Text("Paste your Slack User OAuth token. Your workspace is detected automatically.").foregroundStyle(.secondary)
                     SecureField("User OAuth token (xoxp-…)", text: $slackToken)
@@ -103,7 +111,7 @@ struct PluginDiscovery {
                     .buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent))
                     .disabled(!ready || connecting || plugins.busy).keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 520, height: plugin.id == "google-workspace" ? 420 : 370)
+        }.padding(24).frame(width: 520, height: plugin.id == "google-workspace" ? 420 : plugin.id == "orca" ? 460 : 370)
             .task(id: appearance.connection.identity()) { refresh() }
             .onDisappear { operation?.cancel(); generation = UUID(); slackToken = "" }
     }
@@ -118,7 +126,7 @@ struct PluginDiscovery {
         operation = Task {
             await previous?.value
             guard current(token, identity) else { return }
-            let directories = board.currentProject.map { [$0.directory] } ?? board.projects.map(\.directory)
+            let directories = plugin.id == "orca" ? board.projects.map(\.directory) : board.currentProject.map { [$0.directory] } ?? board.projects.map(\.directory)
             let params: [String: JSONValue] = ["id": .string(plugin.id), "method": .string("discover"), "params": .object([
                 "project_paths": .array(directories.filter { !$0.isEmpty }.map(JSONValue.string)), "launch_app": .bool(plugin.id == "orca")])]
             guard let response = await plugins.call("plugin.setup", params: params, configuration: configuration, isCurrent: { current(token, identity) }) else { return }
@@ -126,7 +134,7 @@ struct PluginDiscovery {
             let found = PluginDiscovery(response["result"], saved: response["config"])
             expectedGeneration = response["generation"].string ?? ""
             discovery = found
-            repository = found.settings["repo"]?.string ?? ""
+            repositories = found.selectedRepositories
             calendar = found.settings["calendar_enabled"]?.bool ?? true
             gmail = found.settings["gmail_enabled"]?.bool ?? false
         }
@@ -139,7 +147,7 @@ struct PluginDiscovery {
             connecting = true
             defer { if current(token, identity) { connecting = false } }
             do {
-                var settings = try discovery.configuration(pluginID: plugin.id, repository: repository, calendar: calendar, gmail: gmail)
+                var settings = try discovery.configuration(pluginID: plugin.id, repositories: repositories, calendar: calendar, gmail: gmail)
                 if plugin.id == "google-workspace" {
                     let choices = settings.filter { ["account", "calendar_enabled", "gmail_enabled"].contains($0.key) }
                     let params: [String: JSONValue] = ["id": .string(plugin.id), "method": .string("authorize"), "expected_generation": .string(expectedGeneration), "params": .object(["connection_config": .object(choices)])]

@@ -14,10 +14,6 @@ The project is `agent-workboard`. Its Rust service and CLI, SwiftUI app, and Wid
 
 agent-memory, Google Workspace, Slack, and Orca integrations are separate plugin packages. The core app contains neither their executable code nor dedicated dependencies. Installed plugins remain disabled until the user enables them. Attach ordinary files, URLs, and artifacts without any plugin.
 
-In plugin settings, choose **Connect**. Orca detects its CLI and registered repositories; agent-memory detects amem. Google uses **Sign in with Google** with Calendar selected by default and Gmail optional. The Workspace release package supplies the publisher's Desktop OAuth client; users do not prepare client JSON. Slack accepts a User OAuth token in a secure field and detects its workspace. Custom paths and developer credentials remain in Advanced settings. See [connection setup](docs/plugin-onboarding.md).
-
-Google Cloud setup is performed once by the publisher, not by each user. Publisher registration and real-account login are still pending, so the current local Google package cannot sign in yet. General distribution also requires production configuration and applicable Google verification.
-
 The agent-memory plugin searches existing documents and memories and submits explicitly selected decisions as memory candidates. Google Workspace centers on Calendar deadlines and meetings, with optional Gmail search and attachments. Orca browses local worktrees and run terminals, imports work as tasks, and launches board tasks through Codex or Claude.
 
 Slack provides message search, source reading, attachments, and task imports. Separately enable sending to post a selected task's status to a specified channel. See [Slack setup](docs/slack.md). Real-account search and sending have not yet been verified.
@@ -55,7 +51,7 @@ scripts/install-local.sh --start-service
 
 Data defaults to `~/Library/Application Support/AgentWorkboard`. Use `--data-dir` and `--socket` for isolated development data. See the [CLI contract](docs/cli-contract.md) and [Google Workspace guide](docs/google-workspace.md).
 
-`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app: `dist/AgentWorkboard-plugin-{agent-memory,google-workspace,slack,orca}-0.2.0.zip`. Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.2.0`. Installation leaves the plugin disabled; follow its guide to configure it.
+`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app, named `dist/AgentWorkboard-plugin-<id>-<version>.zip` (for example `AgentWorkboard-plugin-orca-0.3.0.zip`). Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.3.0`. Installation leaves the plugin disabled; follow its guide to configure it.
 
 `scripts/verify-plugin-packages.sh` checks the two files in each ZIP, extracts and installs it through an isolated CLI, and verifies the disabled default. It does not use the user's board or external accounts.
 
@@ -97,6 +93,7 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 | [Google Workspace](docs/google-workspace.md) | Calendar, Gmail, account setup, verification limits |
 | [Slack](docs/slack.md) | Search, source reading, task attachments, sending, tokens |
 | [Orca](docs/orca-integration.md) | Worktrees, terminals, imports, attachments, launches |
+| [Agent integration](docs/agent-integration.md) | Claude Code and Codex session context, protocol, identity, sandbox rules |
 | [Verification](docs/verification.md) | Passing checks, installation evidence, remaining external checks |
 
 ## Everyday workflow
@@ -104,6 +101,8 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 Create projects and subtasks through the CLI without plugins. Assign a task and start a run to show it as In progress in the app. The widget shows current work, tasks due today, and work completed today. Another agent can continue from artifacts, next actions, and attached files or URLs.
 
 The shared plugin host and all four integration packages are implemented. Plugin failures, disabling, and removal preserve existing task data. See the verification record for the tested scope.
+
+Claude Code and Codex sessions can connect to the board with the optional agent kit: `scripts/install-agent-kit.sh` installs a plugin per tool that adds board context at session start and the agent protocol as a skill. See [Agent integration](docs/agent-integration.md).
 
 The widget shows its last update time. The service requests a refresh when it changes the snapshot, and macOS controls the actual refresh schedule. While active, the app periodically checks the service's change sequence.
 

@@ -1,36 +1,15 @@
 {
   "id": "orca",
   "name": "Orca",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "protocol_version": 1,
   "setup_methods": [
     "discover"
   ],
   "executable": "plugin.py",
-  "methods": [
-    "check",
-    "worktrees.list",
-    "worktrees.get",
-    "worktrees.import",
-    "worktrees.attach",
-    "terminals.list",
-    "terminals.read",
-    "agents.start"
-  ],
-  "read_only_methods": [
-    "check",
-    "worktrees.list",
-    "worktrees.get",
-    "terminals.list",
-    "terminals.read"
-  ],
-  "task_context_methods": [
-    "worktrees.attach",
-    "agents.start"
-  ],
-  "allowed_requests": [
-    "task.create",
-    "task.attach"
-  ],
-  "description": "Browse Orca worktrees and runs, import tasks, and run board tasks with Orca agents."
+  "methods": ["check", "worktrees.list", "worktrees.get", "worktrees.import", "worktrees.attach", "terminals.list", "terminals.read", "agents.start"],
+  "read_only_methods": ["check", "worktrees.list", "worktrees.get", "terminals.list", "terminals.read"],
+  "task_context_methods": ["worktrees.attach", "agents.start"],
+  "allowed_requests": ["task.create", "task.attach"],
+  "description": "Browse worktrees and runs in connected Orca repositories, import tasks, and run board tasks with Orca agents."
 }

@@ -115,7 +115,8 @@ struct PluginSettingsView: View {
 struct PluginConfigurationDraft {
     private let original: [String: JSONValue]
     var executable: String
-    var orcaRepo: String
+    var orcaRepos: String
+    private let savedOrcaRepos: [String]
     var credentialsFile: String
     var account: String
     var calendarEnabled: Bool
@@ -128,7 +129,10 @@ struct PluginConfigurationDraft {
     init(config: JSONValue, defaultsForNewInstall: Bool = false) {
         original = config.object
         executable = config["executable"].string ?? ""
-        orcaRepo = config["repo"].string ?? ""
+        var repos = config["repos"].array.compactMap(\.string)
+        if let legacy = config["repo"].string, !repos.contains(legacy) { repos.insert(legacy, at: 0) }
+        savedOrcaRepos = repos
+        orcaRepos = repos.joined(separator: "\n")
         credentialsFile = config["credentials_file"].string ?? ""
         account = config["account"].string ?? "default"
         calendarEnabled = config["calendar_enabled"].bool ?? (defaultsForNewInstall && original.isEmpty)
@@ -138,14 +142,31 @@ struct PluginConfigurationDraft {
         slackTeamID = config["team_id"].string ?? ""
         advancedJSON = config.pretty
     }
+    /// One Orca repository selector per line, such as `path:/folder`, `id:…`, or `name:…`.
+    var orcaRepoSelectors: [String] {
+        var selectors: [String] = []
+        for line in orcaRepos.split(whereSeparator: \.isNewline) {
+            let selector = line.trimmingCharacters(in: .whitespaces)
+            if !selector.isEmpty && !selectors.contains(selector) { selectors.append(selector) }
+        }
+        return selectors
+    }
+    /// Connects the Orca repository at each board project's folder.
+    mutating func addOrcaRepos(for projects: [BoardProject]) {
+        var selectors = orcaRepoSelectors
+        for project in projects where project.directory.hasPrefix("/") && !selectors.contains("path:" + project.directory) { selectors.append("path:" + project.directory) }
+        orcaRepos = selectors.joined(separator: "\n")
+    }
     func enableParameters(for pluginID: String) throws -> [String: JSONValue] {
         var config = original
         if pluginID == "agent-memory" {
             if !executable.isEmpty { config["executable"] = .string(executable) }
         } else if pluginID == "orca" {
-            guard executable.hasPrefix("/"), !orcaRepo.isEmpty else { throw WorkboardError(message: "Enter the absolute path to the Orca executable and a repository selector.") }
+            let selectors = orcaRepoSelectors
+            guard executable.hasPrefix("/"), !selectors.isEmpty else { throw WorkboardError(message: "Enter the absolute path to the Orca executable and at least one repository.") }
+            guard selectors.allSatisfy({ selector in ["id:", "path:", "name:"].contains { selector.hasPrefix($0) && selector.count > $0.count } }) else { throw WorkboardError(message: "Write each repository as path:/folder, id:…, or name:….") }
             config["executable"] = .string(executable)
-            config["repo"] = .string(orcaRepo)
+            if selectors != savedOrcaRepos { config["repos"] = .array(selectors.map(JSONValue.string)); config.removeValue(forKey: "repo") }
         } else if pluginID == "gmail" || pluginID == "google-workspace" {
             config["account"] = .string(account.isEmpty ? "default" : account)
             if !credentialsFile.isEmpty { config["credentials_file"] = .string(credentialsFile) }
@@ -167,6 +188,7 @@ struct PluginConfigurationDraft {
 
 private struct PluginConfigurationView: View {
     @EnvironmentObject private var appearance: AppearanceSettings
+    @EnvironmentObject private var board: BoardStore
     @Environment(\.dismiss) private var dismiss
     let plugin: InstalledPlugin
     @ObservedObject var plugins: PluginStore
@@ -181,8 +203,11 @@ private struct PluginConfigurationView: View {
                     Text("Only the selected amem CLI is called. Leave blank to keep the previously saved path.").font(.caption).foregroundStyle(Color.secondary)
                 } else if plugin.id == "orca" {
                     HStack { TextField("Orca CLI executable path", text: $draft.executable); Button("Choose…") { chooseFile { draft.executable = $0 } } }
-                    TextField("Repository selector (for example: path:/path/to/repo)", text: $draft.orcaRepo)
-                    Text("Start the Orca app first. Browse work and run agents in the selected repository on this Mac.").font(.caption).foregroundStyle(Color.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack { Text("Repositories"); Spacer(); Button("Add board project folders") { draft.addOrcaRepos(for: board.projects) }.disabled(board.projects.isEmpty) }
+                        TextEditor(text: $draft.orcaRepos).font(.system(.caption, design: .monospaced)).frame(height: 76)
+                    }
+                    Text("One repository per line: path:/folder, id:…, or name:…. Each board project uses the Orca repository at its folder. Start the Orca app first.").font(.caption).foregroundStyle(Color.secondary)
                 } else if plugin.id == "gmail" || plugin.id == "google-workspace" {
                     HStack { TextField("Google Desktop OAuth client JSON", text: $draft.credentialsFile); Button("Choose…") { chooseFile { draft.credentialsFile = $0 } } }
                     TextField("Account label", text: $draft.account)
@@ -204,11 +229,12 @@ private struct PluginConfigurationView: View {
             }.formStyle(.grouped).disabled(!loaded || plugins.busy)
             Divider()
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if plugins.busy { ProgressView().controlSize(.small) }; Button("Save and enable") { enable() }.buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent)).keyboardShortcut(.defaultAction).disabled(!loaded || plugins.busy) }.padding(20)
-        }.frame(width: 560, height: plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : 365).task {
+        }.frame(width: 560, height: plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : plugin.id == "orca" ? 440 : 365).task {
             plugins.error = nil
             guard let response = await plugins.call("plugin.config", params: ["id": .string(plugin.id)], configuration: appearance.connection) else { return }
             guard case .object = response["config"] else { plugins.error = "Could not read the current plugin configuration."; return }
             draft = PluginConfigurationDraft(config: response["config"], defaultsForNewInstall: !plugin.enabled)
+            if plugin.id == "orca" && draft.orcaRepoSelectors.isEmpty { draft.addOrcaRepos(for: board.projects) }
             loaded = true
         }
     }
@@ -235,13 +261,24 @@ private struct OrcaBrowserView: View {
     @State private var prompt = ""
     @State private var starting = false
     @State private var truncated = false
+    @State private var repos: [JSONValue] = []
+    @State private var unmatched: [JSONValue] = []
+    @State private var repoFilter = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
+                Picker("Repository", selection: $repoFilter) {
+                    Text("All connected repositories").tag("")
+                    ForEach(Array(repos.enumerated()), id: \.offset) { Text($0.element["name"].string ?? "Repository").tag($0.element["id"].string ?? "") }
+                }.frame(maxWidth: 320).onChange(of: repoFilter) { Task { await load() } }
                 Button("Refresh worktrees") { Task { await load() } }
                 Spacer()
                 if truncated { Text("Showing partial results. Use the CLI for the complete list.").font(.caption).foregroundStyle(Color.secondary) }
+            }
+            if !unmatched.isEmpty {
+                Text("Not found in Orca: " + unmatched.compactMap { $0["selector"].string }.joined(separator: ", ") + ". Check the repositories in this plugin’s configuration.")
+                    .font(.caption).foregroundStyle(.orange).textSelection(.enabled)
             }
             HSplitView {
                 ScrollView {
@@ -249,8 +286,12 @@ private struct OrcaBrowserView: View {
                         if worktrees.isEmpty { Text("No worktrees loaded.").foregroundStyle(Color.secondary).padding(12) }
                         ForEach(Array(worktrees.enumerated()), id: \.offset) { row in
                             let item = row.element
+                            if row.offset == 0 || worktrees[row.offset - 1]["repo_id"] != item["repo_id"] {
+                                Text(item["repo_name"].string ?? "Repository").font(.caption.weight(.semibold)).foregroundStyle(Color.secondary).padding(.horizontal, 10).padding(.top, row.offset == 0 ? 4 : 12)
+                            }
                             Button {
                                 selected = item; terminals = []; output = ""
+                                if let project = project(for: item) { projectID = project.id }
                                 Task { await loadTerminals(item) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 5) {
@@ -283,6 +324,9 @@ private struct OrcaBrowserView: View {
                                     Text("Codex").tag("codex"); Text("Claude").tag("claude")
                                 }
                                 TextField("Additional instructions (optional)", text: $prompt, axis: .vertical).lineLimit(2...4)
+                                if let owner = board.projects.first(where: { $0.id == task.projectID }), project(for: item)?.id != owner.id {
+                                    Text("This worktree is in \(item["repo_name"].string ?? "another repository"), not in the folder of the task’s project \(owner.name).").font(.caption2).foregroundStyle(.orange)
+                                }
                                 Button("Run selected task in Orca") { Task { await start(item, task: task) } }
                                     .buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent))
                                     .disabled(task.status == .done)
@@ -312,11 +356,25 @@ private struct OrcaBrowserView: View {
     }
 
     private func load() async {
-        if let result = await plugins.run(plugin, method: "worktrees.list", configuration: appearance.connection) {
+        if repos.isEmpty, let check = await plugins.run(plugin, method: "check", configuration: appearance.connection) {
+            repos = check["repos"].array; unmatched = check["unmatched"].array
+        }
+        let params: [String: JSONValue] = repoFilter.isEmpty ? [:] : ["repo_id": .string(repoFilter)]
+        if let result = await plugins.run(plugin, method: "worktrees.list", params: params, configuration: appearance.connection) {
             worktrees = result["worktrees"].array; selected = nil; terminals = []; output = ""
             truncated = result["truncated"].bool ?? false
         }
     }
+    /// The board project whose folder is this worktree's Orca repository, or contains the worktree.
+    private func project(for item: JSONValue) -> BoardProject? {
+        let paths = [item["repo_path"].string, item["path"].string].compactMap { $0 }.map(Self.canonical)
+        return board.projects.first { project in
+            guard project.directory.hasPrefix("/") else { return false }
+            let directory = Self.canonical(project.directory)
+            return paths.contains { $0 == directory || $0.hasPrefix(directory + "/") }
+        }
+    }
+    private static func canonical(_ path: String) -> String { URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path }
     private func loadTerminals(_ item: JSONValue) async {
         if let result = await plugins.run(plugin, method: "terminals.list", params: ["worktree_id": item["id"]], configuration: appearance.connection) {
             terminals = result["terminals"].array

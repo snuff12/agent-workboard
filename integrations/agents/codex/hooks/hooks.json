@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${PLUGIN_ROOT}/scripts/workboard-hook\" codex",
+            "timeout": 10,
+            "statusMessage": "Loading board context"
+          }
+        ]
+      }
+    ]
+  }
+}

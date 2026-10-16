@@ -1,0 +1,14 @@
+{
+  "name": "agent-workboard",
+  "description": "Agent Workboard integrations for coding agents.",
+  "owner": {
+    "name": "Agent Workboard"
+  },
+  "plugins": [
+    {
+      "name": "workboard",
+      "source": "./claude",
+      "description": "Connect Claude Code sessions to Agent Workboard: board context at session start and the agent protocol as a skill."
+    }
+  ]
+}

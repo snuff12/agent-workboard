@@ -32,15 +32,35 @@ def bounded_integer(params, key, default, maximum):
     return min(maximum, value)
 
 
+def repository_selectors(config):
+    # `repos` lists every connected repository. `repo` is the earlier single-repository setting.
+    values = config.get("repos", [])
+    if not isinstance(values, list) or len(values) > 50:
+        raise IntegrationError("repos must be a list of at most 50 repository selectors.", "PLUGIN_INVALID_PARAMS")
+    if "repo" in config:
+        values = [config["repo"], *values]
+    selectors = []
+    for value in values:
+        if not isinstance(value, str) or "\x00" in value or not any(
+                value.startswith(prefix) and value[len(prefix):].strip() for prefix in ("id:", "path:", "name:")):
+            raise IntegrationError("Each repository must use an id:, path:, or name: selector.", "PLUGIN_INVALID_PARAMS")
+        if value not in selectors:
+            selectors.append(value)
+    if not selectors:
+        raise IntegrationError("Connect at least one Orca repository.", "PLUGIN_INVALID_PARAMS")
+    return selectors
+
+
+def same_path(left, right):
+    return os.path.realpath(os.path.expanduser(left)) == os.path.realpath(os.path.expanduser(right))
+
+
 class Orca:
     def __init__(self, config, require_repo=True):
         self.executable = required(config, "executable")
         if not Path(self.executable).is_absolute():
             raise IntegrationError("Specify the absolute path to the Orca executable.", "PLUGIN_INVALID_PARAMS")
-        self.repo = config.get("repo", "")
-        if require_repo and not any(self.repo.startswith(prefix) and self.repo[len(prefix):].strip()
-                   for prefix in ("id:", "path:", "name:")):
-            raise IntegrationError("repo must use an id:, path:, or name: selector.", "PLUGIN_INVALID_PARAMS")
+        self.selectors = repository_selectors(config) if require_repo else []
         self.deadline = time.monotonic() + 24
 
     def call(self, *args):
@@ -74,26 +94,52 @@ class Orca:
             raise IntegrationError("Orca result is not an object.", "PLUGIN_INVALID_RESPONSE")
         return payload
 
-    def repository(self):
-        repo = self.call("repo", "show", "--repo", self.repo).get("repo")
-        if not isinstance(repo, dict) or not isinstance(repo.get("id"), str) or not repo["id"]:
-            raise IntegrationError("Could not verify the Orca repository ID.", "PLUGIN_INVALID_RESPONSE")
-        return repo
+    def repositories(self):
+        """Resolves the configured selectors with one listing; returns connected and unmatched ones."""
+        connected, unmatched = match_selectors(self.selectors, local_repositories(self.call("repo", "list")))
+        if not connected:
+            raise IntegrationError("None of the configured repositories is registered in Orca on this Mac: "
+                                   + ", ".join(entry["selector"] for entry in unmatched)[:1000])
+        return connected, unmatched
 
-    def worktree(self, params, repo):
+    def worktree(self, params, repos):
         identifier = required(params, "worktree_id")
-        if not identifier.startswith(repo["id"] + "::"):
-            raise IntegrationError("Only worktrees in the configured Orca repository can be used.", "PLUGIN_SCOPE_MISMATCH")
+        repo = next((row for row in repos if identifier.startswith(row["id"] + "::")), None)
+        if repo is None:
+            raise IntegrationError("Only worktrees in connected Orca repositories can be used.", "PLUGIN_SCOPE_MISMATCH")
         item = self.call("worktree", "show", "--worktree", "id:" + identifier).get("worktree")
         validate_worktree(item, repo["id"])
         if item["id"] != identifier:
             raise IntegrationError("The returned worktree ID does not match.", "PLUGIN_SCOPE_MISMATCH")
-        return item
+        return item, repo
+
+
+def local_repositories(response):
+    rows = response.get("repos")
+    if not isinstance(rows, list) or len(rows) > 1000:
+        raise IntegrationError("Could not read Orca’s registered repositories.", "PLUGIN_INVALID_RESPONSE")
+    return [row for row in rows if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]
+            and "::" not in row["id"] and row.get("hostId", "local") in (None, "local")
+            and isinstance(row.get("path"), str) and Path(row["path"]).is_absolute()]
+
+
+def match_selectors(selectors, local):
+    connected, unmatched = [], []
+    for selector in selectors:
+        kind, value = selector.split(":", 1)
+        matches = [row for row in local if (row["id"] == value if kind == "id" else
+                   same_path(row["path"], value) if kind == "path" else row.get("displayName") == value)]
+        if len(matches) != 1:
+            unmatched.append({"selector": selector, "reason": "matches several repositories" if matches
+                              else "not registered in Orca on this Mac"})
+        elif all(row["id"] != matches[0]["id"] for row in connected):
+            connected.append(matches[0])
+    return connected, unmatched
 
 
 def validate_worktree(item, repo_id):
     if not isinstance(item, dict) or item.get("repoId") != repo_id:
-        raise IntegrationError("The returned repository differs from the configured Orca repository.", "PLUGIN_SCOPE_MISMATCH")
+        raise IntegrationError("The returned repository differs from the requested Orca repository.", "PLUGIN_SCOPE_MISMATCH")
     required(item, "id")
     if not item["id"].startswith(repo_id + "::"):
         raise IntegrationError("The worktree ID does not match the repository.", "PLUGIN_SCOPE_MISMATCH")
@@ -101,12 +147,17 @@ def validate_worktree(item, repo_id):
         raise IntegrationError("This plugin currently supports only local worktrees on this Mac.", "PLUGIN_SCOPE_MISMATCH")
 
 
-def worktree_info(item):
-    return {key: item.get(source) for key, source in (
+def worktree_info(item, repo):
+    info = {key: item.get(source) for key, source in (
         ("id", "id"), ("repo_id", "repoId"), ("project_id", "projectId"), ("host_id", "hostId"),
         ("instance_id", "instanceId"), ("path", "path"), ("branch", "branch"), ("head", "head"),
         ("title", "displayName"), ("comment", "comment"), ("workspace_status", "workspaceStatus"),
         ("archived", "isArchived"))}
+    return {**info, "repo_name": repo.get("displayName") or repo["path"], "repo_path": repo["path"]}
+
+
+def repository_info(repo):
+    return {"id": repo["id"], "name": repo.get("displayName") or repo["path"], "path": repo["path"]}
 
 
 def terminal_list(orca, item):
@@ -117,12 +168,12 @@ def terminal_list(orca, item):
     return result
 
 
-def attachment(item, task_id, revision=None):
+def attachment(item, repo, task_id, revision=None):
     observed = dt.datetime.now(dt.timezone.utc).isoformat()
     params = {"task_id": task_id, "path": item["path"], "kind": "workspace",
               "description": "Orca · " + (item.get("displayName") or item["path"]),
               "provider": "orca", "locator": item["id"], "verified_at": observed,
-              "metadata": {"provider": "orca", "observed_at": observed, **worktree_info(item)}}
+              "metadata": {"provider": "orca", "observed_at": observed, **worktree_info(item, repo)}}
     if revision is not None:
         params["expected_revision"] = revision
     return {"method": "task.attach", "params": params}
@@ -143,7 +194,7 @@ def replay_launch(record, fingerprint, run_id):
                            + "’ terminal in Orca. It will not be relaunched automatically.", "PLUGIN_EXTERNAL_RESULT_UNKNOWN")
 
 
-def start_agent(orca, item, params, config):
+def start_agent(orca, item, repo, params, config):
     task = params["task"]
     agent = required(params, "agent")
     commands = config.get("agent_commands", {"codex": ["codex"], "claude": ["claude"]})
@@ -161,17 +212,22 @@ def start_agent(orca, item, params, config):
     cli = [required(connection, "executable"), "--data-dir", required(connection, "data_dir"),
            "--socket", required(connection, "socket")]
     read = shlex.join([*cli, "task", "show", task["id"], "--json"])
-    review = shlex.join([*cli, "rpc", "task.review", "--params", json.dumps({"task_id": task["id"],
-        "run_id": run_id, "agent_id": "orca:" + agent, "summary": "Record verified results and remaining decisions here.",
-        "expected_revision": "Replace with the latest integer task.revision"}, ensure_ascii=False), "--json"])
+    # WORKBOARD_AGENT below makes these commands act as the run's assignee.
+    review = shlex.join([*cli, "task", "review", task["id"], "--run", run_id,
+                         "--summary", "Replace with verified results and remaining decisions", "--json"])
+    protocol = params.get("agent_protocol")
+    protocol = protocol if isinstance(protocol, str) and len(protocol) <= 20000 else ""
     prompt = ("Perform the board task.\nTask ID: " + task["id"] + "\nRun ID: " + run_id
               + "\nTitle: " + task.get("title", "") + "\nGoal: " + task.get("goal", "")
               + "\nCompletion criteria: " + task.get("completion_criteria", "") + "\nNext action: " + task.get("next_action", "")
               + "\n\nRead the latest task before starting and before changing its status:\n" + read
               + "\n\nDo not complete a task merely because a response ended. Record verification results and the next action, then request review."
-              + " Replace summary and expected_revision in the following command with actual values:\n" + review
+              + " Replace the summary in the following command with actual values:\n" + review
+              + ("\n\n" + protocol if protocol else "")
               + "\n\nAdditional instructions:\n" + extra)
-    shell_command = shlex.join([*command, prompt])
+    environment = ["env", "WORKBOARD_AGENT=orca:" + agent, "WORKBOARD_DATA_DIR=" + connection["data_dir"],
+                   "WORKBOARD_SOCKET=" + connection["socket"]]
+    shell_command = shlex.join([*environment, *command, prompt])
     # Mutable board text must not prevent recovering an already launched run's
     # original link after the task is edited or a newer run has started.
     fingerprint = hashlib.sha256(json.dumps({"command": command, "prompt": extra, "connection": cli,
@@ -200,8 +256,8 @@ def start_agent(orca, item, params, config):
     if not isinstance(terminal, dict) or not terminal.get("handle") or terminal.get("worktreeId") != item["id"]:
         raise IntegrationError("Could not verify the created terminal. Check the launch request in Orca.", "PLUGIN_EXTERNAL_RESULT_UNKNOWN")
     result = {"task_id": task["id"], "run_id": run_id, "agent": agent, "terminal": {
-        k: terminal.get(k) for k in ("handle", "title", "worktreeId")}, "worktree": worktree_info(item)}
-    link = attachment(item, task["id"])
+        k: terminal.get(k) for k in ("handle", "title", "worktreeId")}, "worktree": worktree_info(item, repo)}
+    link = attachment(item, repo, task["id"])
     link["idempotency_key"] = "launch-link:" + hashlib.sha256(run_id.encode()).hexdigest()
     link["params"]["run_id"] = run_id
     link["params"]["metadata"]["terminal_handle"] = terminal["handle"]
@@ -254,28 +310,25 @@ def discover(config, params):
                 if time.monotonic() >= deadline:
                     raise IntegrationError("Orca is starting. Try connecting again in a moment.") from None
                 time.sleep(0.25)
-    rows = response.get("repos")
-    if not isinstance(rows, list) or len(rows) > 1000:
-        raise IntegrationError("Could not read Orca's registered repositories.", "PLUGIN_INVALID_RESPONSE")
-    repositories = [{"id": required(row, "id"), "name": row.get("displayName") or required(row, "path"),
-                     "path": required(row, "path")} for row in rows
-                    if isinstance(row, dict) and row.get("hostId", "local") in (None, "local")
-                    and isinstance(row.get("path"), str) and Path(row["path"]).is_absolute()]
-    selected = next((row for row in repositories if config.get("repo") in
-                     ("id:" + row["id"], "path:" + row["path"])), None)
+    local = local_repositories(response)
     paths = params.get("project_paths", [])
     if not isinstance(paths, list) or any(not isinstance(path, str) for path in paths):
         raise IntegrationError("project_paths must be an array of paths.", "PLUGIN_INVALID_PARAMS")
-    matches = [row for row in repositories if any(Path(path).expanduser().resolve() ==
-               Path(row["path"]).resolve() for path in paths if path)]
-    if selected is None:
-        selected = matches[0] if len(matches) == 1 else repositories[0] if len(repositories) == 1 else None
+    # Keep the saved repositories; otherwise preselect the repository at each board project folder.
+    try:
+        selected, _ = match_selectors(repository_selectors(config), local)
+    except IntegrationError:
+        selected = []
+    if not selected:
+        selected = [row for row in local if any(same_path(row["path"], path) for path in paths if path)]
+    if not selected and len(local) == 1:
+        selected = local
     settings = {"executable": executable}
     if selected:
-        settings["repo"] = "id:" + selected["id"]
-    return {"ok": True, "result": {"available": bool(repositories), "config": settings,
-        "repositories": repositories, "message": "Choose a repository to connect." if repositories
-        else "Add a local repository in Orca, then try again."}}
+        settings["repos"] = ["id:" + row["id"] for row in selected]
+    return {"ok": True, "result": {"available": bool(local), "config": settings,
+        "repositories": [repository_info(row) for row in local], "message": "Choose the repositories to connect."
+        if local else "Add a local repository in Orca, then try again."}}
 
 
 def run(request):
@@ -305,24 +358,37 @@ def run(request):
         required(params, "terminal")
         limit = max(1, bounded_integer(params, "limit", 80, 200))
         cursor = bounded_integer(params, "cursor", 0, 2**53 - 1)
-    orca = Orca(config)
-    repo = orca.repository()
-    if method == "check":
-        return {"ok": True, "result": {"available": True, "repo_id": repo["id"], "repo_name": repo.get("displayName", "")}}
     if method == "worktrees.list":
         limit = max(1, bounded_integer(params, "limit", 50, 100))
-        result = orca.call("worktree", "list", "--repo", "id:" + repo["id"], "--limit", str(limit))
-        rows = result.get("worktrees")
-        if not isinstance(rows, list):
-            raise IntegrationError("Unexpected Orca worktree list format.", "PLUGIN_INVALID_RESPONSE")
-        for row in rows:
-            validate_worktree(row, repo["id"])
-        return {"ok": True, "result": {"worktrees": [worktree_info(row) for row in rows],
-                "truncated": result.get("truncated", False), "total_count": result.get("totalCount", len(rows))}}
-    item = orca.worktree(params, repo)
-    info = worktree_info(item)
+        if "repo_id" in params:
+            required(params, "repo_id")
+    orca = Orca(config)
+    repos, unmatched = orca.repositories()
+    if method == "check":
+        return {"ok": True, "result": {"available": True, "repos": [repository_info(repo) for repo in repos],
+                                       "unmatched": unmatched}}
+    if method == "worktrees.list":
+        selected = [repo for repo in repos if repo["id"] == params["repo_id"]] if "repo_id" in params else repos
+        if not selected:
+            raise IntegrationError("Choose a connected Orca repository.", "PLUGIN_SCOPE_MISMATCH")
+        worktrees, truncated, total = [], False, 0
+        for repo in selected:
+            result = orca.call("worktree", "list", "--repo", "id:" + repo["id"], "--limit", str(limit))
+            rows = result.get("worktrees")
+            if not isinstance(rows, list):
+                raise IntegrationError("Unexpected Orca worktree list format.", "PLUGIN_INVALID_RESPONSE")
+            for row in rows:
+                validate_worktree(row, repo["id"])
+            worktrees.extend(worktree_info(row, repo) for row in rows)
+            truncated = truncated or result.get("truncated", False) is True
+            count = result.get("totalCount", len(rows))
+            total += count if type(count) is int else len(rows)
+        return {"ok": True, "result": {"worktrees": worktrees[:limit], "truncated": truncated or len(worktrees) > limit,
+                "total_count": total, "repos": [repository_info(repo) for repo in selected]}}
+    item, repo = orca.worktree(params, repos)
+    info = worktree_info(item, repo)
     if method == "agents.start":
-        return start_agent(orca, item, params, config)
+        return start_agent(orca, item, repo, params, config)
     if method == "worktrees.get":
         return {"ok": True, "result": info}
     if method in ("terminals.list", "terminals.read"):
@@ -340,14 +406,14 @@ def run(request):
         # Return emitted output, never UI draft/composer fields.
         return {"ok": True, "result": {k: output[k] for k in ("handle", "status", "tail", "oldestCursor", "nextCursor", "latestCursor", "source", "truncated", "limited") if k in output}}
     if method == "worktrees.attach":
-        requests = [attachment(item, params["task_id"], params["task"]["revision"])]
+        requests = [attachment(item, repo, params["task_id"], params["task"]["revision"])]
     else:
         creation = {"project_id": params["project_id"], "title": params.get("title") or item.get("displayName") or item["path"],
                     "goal": item.get("comment") or "Check the Orca worktree’s task goal and completion criteria.",
                     "next_action": "Check the Orca run results and define the next action and completion criteria."}
         if params.get("parent_id"):
             creation["parent_id"] = params["parent_id"]
-        requests = [{"method": "task.create", "params": creation}, attachment(item, {"$result": "/0/task_id"})]
+        requests = [{"method": "task.create", "params": creation}, attachment(item, repo, {"$result": "/0/task_id"})]
     # A workspace/terminal state is an observation, never a board completion signal.
     return {"ok": True, "result": info, "requests": requests}
 

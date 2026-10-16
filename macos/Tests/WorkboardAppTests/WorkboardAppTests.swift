@@ -43,19 +43,25 @@ import Darwin
     }
     static func pluginConnectionDiscovery() throws {
         let saved = JSONValue.object(["future_option": .bool(true), "account": .string("personal")])
-        let found = PluginDiscovery(.object(["available": .bool(true), "config": .object(["executable": .string("/detected/orca"), "repo": .string("id:one")]),
-            "repositories": .array([.object(["id": .string("one"), "name": .string("Project"), "path": .string("/project")])])]), saved: saved)
-        let config = try found.configuration(pluginID: "orca", repository: "id:one", calendar: false, gmail: false)
+        let legacy = JSONValue.object(["future_option": .bool(true), "account": .string("personal"), "repo": .string("path:/project")])
+        let found = PluginDiscovery(.object(["available": .bool(true), "config": .object(["executable": .string("/detected/orca"), "repos": .array([.string("id:one"), .string("id:gone")])]),
+            "repositories": .array([.object(["id": .string("one"), "name": .string("Project"), "path": .string("/project")]),
+                                    .object(["id": .string("two"), "name": .string("Other"), "path": .string("/other")])])]), saved: legacy)
+        try require(found.selectedRepositories == ["id:one"], "Discovery preselected an undetected repository or a raw saved selector")
+        let config = try found.configuration(pluginID: "orca", repositories: ["id:two", "id:one"], calendar: false, gmail: false)
         try require(config["executable"]?.string == "/detected/orca" && config["future_option"]?.bool == true, "Discovery lost a detected path or advanced setting")
-        do { _ = try found.configuration(pluginID: "orca", repository: "id:foreign", calendar: false, gmail: false); throw Failure(description: "An undetected repository was accepted") }
+        try require(config["repos"] == .array([.string("id:one"), .string("id:two")]) && config["repo"] == nil, "Connected repositories were not saved in place of the earlier single setting")
+        for selection: Set<String> in [[], ["id:one", "id:foreign"]] {
+            do { _ = try found.configuration(pluginID: "orca", repositories: selection, calendar: false, gmail: false); throw Failure(description: "An empty or undetected repository selection was accepted") }
+            catch is WorkboardError { }
+        }
+        do { _ = try found.configuration(pluginID: "google-workspace", repositories: [], calendar: false, gmail: false); throw Failure(description: "No-service Google connection was accepted") }
         catch is WorkboardError { }
-        do { _ = try found.configuration(pluginID: "google-workspace", repository: "", calendar: false, gmail: false); throw Failure(description: "No-service Google connection was accepted") }
-        catch is WorkboardError { }
-        let google = try found.configuration(pluginID: "google-workspace", repository: "", calendar: true, gmail: false)
+        let google = try PluginDiscovery(.object(["available": .bool(true)]), saved: saved).configuration(pluginID: "google-workspace", repositories: [], calendar: true, gmail: false)
         try require(google["calendar_enabled"]?.bool == true && google["gmail_enabled"]?.bool == false && google["account"]?.string == "personal", "Google service choices or account were lost")
         let unready = PluginDiscovery(.object(["available": .string("true")]), saved: .object([:]))
         try require(!unready.available, "String flag enabled a connection")
-        print("✓ Plugin discovery: local selection, advanced settings, and Google service choices verified")
+        print("✓ Plugin discovery: repository selection, advanced settings, and Google service choices verified")
     }
     static func rpcCancellation() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("workboard-cancel-\(UUID().uuidString)")
@@ -213,12 +219,15 @@ import Darwin
         try require(!invalidBoolean.calendarEnabled && !invalidBoolean.gmailEnabled, "Non-Boolean plugin values enabled a service")
         let orcaSaved: JSONValue = .object(["executable": .string("/custom/orca"), "repo": .string("id:repo-1"), "agent_commands": .object(["codex": .array([.string("/custom/codex")])])])
         var orcaDraft = PluginConfigurationDraft(config: orcaSaved)
-        try require(orcaDraft.orcaRepo == "id:repo-1" && orcaDraft.executable == "/custom/orca", "Orca settings were not restored")
+        try require(orcaDraft.orcaRepoSelectors == ["id:repo-1"] && orcaDraft.executable == "/custom/orca", "Orca settings were not restored")
         let orcaUnchanged = try orcaDraft.enableParameters(for: "orca")["config"]
         try require(orcaUnchanged == orcaSaved, "Orca save lost custom agent command")
-        orcaDraft.orcaRepo = "path:/new/repo"
+        orcaDraft.orcaRepos = "id:repo-1\n  path:/new/repo  \n\npath:/new/repo"
+        orcaDraft.addOrcaRepos(for: [BoardProject(.object(["id": .string("p1"), "directory": .string("/board/app")]))!, BoardProject(.object(["id": .string("p2"), "directory": .string("")]))!])
         let orcaEdited = try orcaDraft.enableParameters(for: "orca")["config"]!
-        try require(orcaEdited["repo"].string == "path:/new/repo" && orcaEdited["agent_commands"] == orcaSaved["agent_commands"], "Orca scope edit lost saved options")
+        try require(orcaEdited["repos"] == .array([.string("id:repo-1"), .string("path:/new/repo"), .string("path:/board/app")]) && orcaEdited["repo"] == .null && orcaEdited["agent_commands"] == orcaSaved["agent_commands"], "Orca repository edit lost saved options or repositories")
+        orcaDraft.orcaRepos = "id:repo-1\n/no/prefix"
+        try require((try? orcaDraft.enableParameters(for: "orca")) == nil, "Orca accepted a repository without a selector prefix")
         let slackSaved: JSONValue = .object(["account": .string("work-slack"), "team_id": .string("T123"), "credentials_file": .string("/custom/slack.credentials.json"), "messages_enabled": .bool(true), "send_enabled": .bool(false), "future_option": .string("keep")])
         var slackDraft = PluginConfigurationDraft(config: slackSaved)
         try require(slackDraft.slackMessagesEnabled && !slackDraft.slackSendEnabled, "Slack sending was enabled without an explicit setting")

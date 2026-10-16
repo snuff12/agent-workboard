@@ -91,13 +91,13 @@ On October 15, 2026, the Apple Silicon development build included the core app/C
 | Installer | Eight actual app/service/DB/socket takeover/locking/recovery tests; launchctl/LaunchServices simulated. |
 | Actual installs | Updated `~/Applications/Agent Workboard.app`, `~/.local/bin/workboard`, and user LaunchAgent after backing up eight schema-3 tasks and checking integrity. Doctor reported schema 4/WAL/healthy; app/CLI/service hashes matched release. No plugins installed. The second Mac repeated installation/hash/doctor checks and task links opened the installed app. These schema values are historical. |
 | Bundle/DMG | Nested ad-hoc signatures/plists and disk image checksum verified; not notarized distribution. |
-| Actual amem | One isolated research search/read/attachment preserved location/hash. No source mutation, sync, or actual capture. |
+| Actual amem | One isolated research search/read/attachment preserved location/hash. No source mutation, sync, or actual capture. On October 16, 2026, the installed amem engine with a disposable home and synthetic documents verified attachment fields, `verify` before and after a source edit and resync, replacement attachment, and one scoped inbox capture with retry deduplication. The user's amem data was not used. |
 | Workspace Keychain | Disposable account/fake token real save/read/delete only; no real Google tokens/consent/refresh. |
 | Plugin distribution | Initial two archives contained only manifest/executable, reproduced checksums, installed disabled, and started neither external providers nor the core service. Later stages expanded to four archives. |
 
 Review fixes for restore, run identity, paths, process termination, response sizes, connection generations, and preferences were covered by regressions. The earlier 48 Rust/72 Python/8 installer total was 128. The second Mac later passed Rust 53/Python 74/installer 8, Swift/WidgetKit/format/clippy, plus seven XCUITests. Fixes included Xcode concurrency, subtask hit areas, accessible add labels, shared snapshot access, app-stopped reload, widget time format, and surviving old widget processes. See [acceptance audit](completion-audit.md).
 
-Explicit capture consent, decision/procedure restriction, private inbox, retry deduplication, and uncertainty were tested with fake amem, not actual memory storage. No test plugin was installed in the user's default board.
+Explicit capture consent, decision/procedure restriction, private inbox, retry deduplication, and uncertainty were tested with fake amem. Scoped capture and retry deduplication were also checked against the installed amem engine in a disposable home, not the user's memory storage. No test plugin was installed in the user's default board.
 
 ## Slack verification
 

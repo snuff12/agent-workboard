@@ -5,7 +5,7 @@ Users should select a service and connect it. Local executable paths, account la
 | Plugin | Normal connection |
 | --- | --- |
 | agent-memory | Connect detects amem in standard locations or the saved custom path and verifies help output. No memory search or capture during setup. |
-| Orca | Connect detects the CLI, opens the installed app if needed, and lists registered local repositories. Select a repository by name; a unique board-directory match is preselected. |
+| Orca | Connect detects the CLI, opens the installed app if needed, and lists registered local repositories. Check the repositories to connect; saved repositories, or else the repositories at board project folders, are preselected. |
 | Google Workspace | Select Calendar and optional Gmail, then Sign in with Google. The separate release package contains the publisher's registered Desktop OAuth client. Tokens remain in Keychain; only successful authentication enables the plugin. |
 | Slack | Paste a User OAuth token into a secure field. The workspace is detected automatically. No token file or workspace ID input; status sending stays separate. Browser OAuth is not implemented for Slack. |
 

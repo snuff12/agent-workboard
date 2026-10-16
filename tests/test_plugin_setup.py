@@ -166,9 +166,17 @@ class LocalDiscovery(unittest.TestCase):
                 {"id": "remote", "path": "/repo/remote", "hostId": "remote"}]
         with mock.patch.object(orca.Path, "home", return_value=self.home), mock.patch.object(orca.Orca, "call", return_value={"repos": rows}) as call:
             result = orca.discover({}, {"project_paths": ["/repo/selected"]})["result"]
-        self.assertEqual(result["config"], {"executable": str(executable), "repo": "id:b"})
+        self.assertEqual(result["config"], {"executable": str(executable), "repos": ["id:b"]})
         self.assertEqual(len(result["repositories"]), 2)
         call.assert_called_once_with("repo", "list")
+
+    def test_orca_preselects_the_repository_of_every_board_project(self):
+        orca = provider("orca")
+        executable = self.executable("orca")
+        rows = [{"id": "a", "path": "/repo/first"}, {"id": "b", "path": "/repo/second"}, {"id": "c", "path": "/repo/third"}]
+        with mock.patch.object(orca.Path, "home", return_value=self.home), mock.patch.object(orca.Orca, "call", return_value={"repos": rows}):
+            result = orca.discover({}, {"project_paths": ["/repo/third/", "/repo/first", "/not/in/orca"]})["result"]
+        self.assertEqual(result["config"], {"executable": str(executable), "repos": ["id:a", "id:c"]})
 
     def test_multiple_orca_repositories_require_selection(self):
         orca = provider("orca")
@@ -176,7 +184,7 @@ class LocalDiscovery(unittest.TestCase):
         rows = [{"id": "a", "path": "/repo/first"}, {"id": "b", "path": "/repo/second"}]
         with mock.patch.object(orca.Path, "home", return_value=self.home), mock.patch.object(orca.Orca, "call", return_value={"repos": rows}):
             result = orca.discover({}, {})["result"]
-        self.assertNotIn("repo", result["config"])
+        self.assertNotIn("repos", result["config"])
         self.assertTrue(result["available"])
 
     def test_orca_custom_path_and_saved_repository_are_preserved(self):
@@ -184,8 +192,12 @@ class LocalDiscovery(unittest.TestCase):
         executable = self.executable("custom-orca")
         rows = [{"id": "a", "path": "/repo/first"}, {"id": "b", "path": "/repo/second"}]
         with mock.patch.object(orca.Orca, "call", return_value={"repos": rows}):
-            result = orca.discover({"executable": str(executable), "repo": "path:/repo/second"}, {})["result"]
-        self.assertEqual(result["config"], {"executable": str(executable), "repo": "id:b"})
+            result = orca.discover({"executable": str(executable), "repo": "path:/repo/second"}, {"project_paths": ["/repo/first"]})["result"]
+        self.assertEqual(result["config"], {"executable": str(executable), "repos": ["id:b"]},
+                         "saved repositories, including the earlier single setting, win over board folders")
+        with mock.patch.object(orca.Orca, "call", return_value={"repos": rows}):
+            result = orca.discover({"executable": str(executable), "repos": ["id:a", "path:/repo/second"]}, {})["result"]
+        self.assertEqual(result["config"]["repos"], ["id:a", "id:b"])
 
 
 if __name__ == "__main__":

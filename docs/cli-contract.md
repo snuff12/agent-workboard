@@ -19,6 +19,11 @@ workboard task start <task-id> --run <run-id> --request-id <request-id> --json
 workboard task review <task-id> --run <run-id> --summary <summary> --request-id <request-id> --json
 workboard task complete <task-id> --run <run-id> --summary <summary> --request-id <request-id> --json
 workboard task resume-context <task-id> --json
+workboard task heartbeat <task-id> --json
+workboard task pause <task-id> --run <run-id> --summary <state> --next-action <action> --json
+workboard task release <task-id> --json
+workboard agent context --json
+workboard agent brief
 workboard events --after <sequence> --json
 workboard task attach <task-id> --source <path-or-url> --json
 workboard task delete <task-id> --expected-revision <revision> --json
@@ -26,6 +31,8 @@ workboard task delete <task-id> --with-subtasks --json
 workboard project delete <project-id> --with-tasks --agent <agent-id> --json
 workboard doctor --json
 ```
+
+Commands that act for an agent (claim, start, review, complete, pause, heartbeat, release, update, attach, and deletion) add `agent_id` from `WORKBOARD_AGENT`, or from `CODEX_THREAD_ID` as `codex:<thread>`, when `--agent` is omitted. `inbox capture` uses the same ID as its source. `rpc` never adds it. `agent context` summarizes board work for the current directory, `agent brief` prints the agent protocol, and `agent hook --client claude|codex` is the session-start hook. See [Agent integration](agent-integration.md).
 
 Subtasks created with `--parent` use ordinary task commands for state, assignment, and artifacts. Parent details include child lists and completed counts. Missing mutation inputs return structured errors an agent can act on.
 
@@ -142,7 +149,8 @@ workboard plugin enable agent-memory --executable <amem-path> --json
 workboard plugin disable agent-memory --json
 workboard plugin run agent-memory search --task <task-id> --query <query> --collection <collection> --json
 workboard plugin run agent-memory read --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
-workboard plugin run agent-memory attach --task <task-id> --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
+workboard plugin run agent-memory attach --task <task-id> --query <query> --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
+workboard plugin run agent-memory verify --params '{"artifact":<artifact-from-task-get>}' --json
 workboard plugin check agent-memory --json
 workboard plugin remove agent-memory --json
 ```
