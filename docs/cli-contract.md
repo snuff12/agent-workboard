@@ -149,7 +149,8 @@ workboard plugin enable agent-memory --executable <amem-path> --json
 workboard plugin disable agent-memory --json
 workboard plugin run agent-memory search --task <task-id> --query <query> --collection <collection> --json
 workboard plugin run agent-memory read --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
-workboard plugin run agent-memory attach --task <task-id> --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
+workboard plugin run agent-memory attach --task <task-id> --query <query> --params '{"ref":"<search-ref>","collection":"<collection>"}' --json
+workboard plugin run agent-memory verify --params '{"artifact":<artifact-from-task-get>}' --json
 workboard plugin check agent-memory --json
 workboard plugin remove agent-memory --json
 ```

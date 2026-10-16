@@ -9,15 +9,17 @@
     "search",
     "read",
     "attach",
+    "verify",
     "capture"
   ],
   "allowed_requests": [
     "task.attach"
   ],
-  "description": "Search evidence with the existing amem CLI and attach verified sources to tasks.",
+  "description": "Search evidence with the existing amem CLI, attach verified sources to tasks, and recheck attached sources.",
   "read_only_methods": [
     "check",
     "search",
-    "read"
+    "read",
+    "verify"
   ]
 }

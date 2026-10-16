@@ -47,15 +47,18 @@ A task can start with only a goal, completion criteria, and next action. Ordinar
 1. Choose a collection appropriate to the project and question.
 2. Select relevant sources from a small result set.
 3. Read the source and location with `amem read`.
-4. Attach the original path, collection, location, and verification metadata.
+4. Attach the original path, collection, location, and verification metadata. Pass the search query too, so a later check can rediscover the source.
 
 The plugin does not update external indexes automatically. Follow existing amem administration procedures when source refresh is needed.
 
 ```sh
 workboard plugin run agent-memory search --params '{"collection":"research","query":"specific evidence needed for this task","limit":3}'
 workboard plugin run agent-memory read --params '{"ref":"SEARCH_REF"}'
-workboard plugin run agent-memory attach --params '{"task_id":"TASK_ID","ref":"SEARCH_REF","collection":"research"}'
+workboard plugin run agent-memory attach --params '{"task_id":"TASK_ID","ref":"SEARCH_REF","collection":"research","query":"specific evidence needed for this task"}'
+workboard plugin run agent-memory verify --params '{"artifact":ARTIFACT_FROM_TASK_GET}'
 ```
+
+`attach` sets the artifact's `provider`, `locator`, and `verified_at` fields and keeps the same values in its metadata.
 
 Apply identical project/domain scopes to search and read. Use reviewed memory by default and distinguish inbox candidates in review workflows.
 
@@ -69,13 +72,23 @@ amem refs belong to source generations. Failure after a source changes is expect
 - Verification time and attachment reason.
 - Optional rediscovery query and scope.
 
-When an enabled reread detects changed content, mark evidence stale and search again. Never guess or construct refs manually. While disabled, show last verified metadata and paths without external reads.
+`verify` is read-only. Pass it an attached artifact as `task get` returns it. It rereads the stored ref with the stored scope and reports one of these states:
+
+| Status | Meaning |
+| --- | --- |
+| `current` | amem returns the same path, collection, and content hash. |
+| `changed` | The ref still reads, but the path, collection, or hash differs. |
+| `unreadable` | amem rejected the ref, usually because the source was reindexed. `detail` holds the amem message. |
+
+For `changed` or `unreadable`, `verify` searches the same collection and scope again. It uses the stored query, or a `query` passed to `verify` for evidence attached before queries were stored. Candidates on the original path carry `same_path: true`. Read a candidate and `attach` it to record the current source. Without a query, `verify` does not search. If amem cannot start or times out, `verify` fails with `INTEGRATION_UNAVAILABLE` instead of reporting a source state.
+
+`verify` compares against amem's current index. It does not refresh the index; follow the existing amem procedures for that. The board does not yet store a stale flag on the earlier artifact, because the service has no artifact update request. The earlier artifact keeps its last verified metadata. Never guess or construct refs manually. While disabled, show last verified metadata and paths without external reads.
 
 ## Results and memory candidates
 
 Artifacts/resume summaries are operational board data. Only user-requested decisions/procedures are sent to `amem capture` as inbox candidates when enabled. While disabled, keep results in the board. Completed tasks and conversations do not automatically become reviewed long-term memory.
 
-Candidates link source task/artifact paths, project scope, creation time, and selected content. Promotion follows the existing provenance, sensitivity, expiry, and conflict review policies.
+Candidates link source task/artifact paths, project scope, creation time, and selected content. `capture` accepts `task_id` and `artifact_path` and records them in the amem `source` field, for example `Agent Workboard; task TASK_ID; artifact PATH`. It maps `project` or `domain` to the amem scope `project:<name>` or `domain:<name>`, and uses `global` when neither is given. A candidate takes one scope, so passing both is rejected. amem records the creation time. The body is sent on standard input and other user text as `--option=value`, so text that starts with a dash stays literal. Promotion follows the existing provenance, sensitivity, expiry, and conflict review policies.
 
 Board writes and external capture are not one atomic transaction. The host journal and plugin record reuse completed responses for identical requests. If the external outcome is uncertain, refuse automatic recapture and ask for inbox verification. This does not add idempotent storage to amem itself.
 
@@ -83,7 +96,7 @@ Board writes and external capture are not one atomic transaction. The host journ
 
 Handle missing executables, permissions, malformed responses, and timeouts without blocking core create/edit/search/resume or app/widget startup. Do not hold core write transactions during external calls. Request board changes through the service, never direct database writes.
 
-Absent plugins return `PLUGIN_NOT_INSTALLED`; disabled plugins return `PLUGIN_DISABLED`. Do not install/enable automatically. An enabled but unavailable executable returns `INTEGRATION_UNAVAILABLE` or a specific failure. Reinstallation/reconnection adds memory features to existing tasks without importing or converting them.
+Absent plugins return `PLUGIN_NOT_INSTALLED`; disabled plugins return `PLUGIN_DISABLED`. Do not install/enable automatically. An enabled plugin returns `INVALID_REQUEST` for missing or malformed input, before it runs amem. A missing executable, timeout, amem failure, or malformed amem response returns `INTEGRATION_UNAVAILABLE`. A capture request ID reused for different content returns `REQUEST_ID_CONFLICT`, and an earlier capture with an unknown outcome returns `PLUGIN_RESULT_UNCERTAIN`. Reinstallation/reconnection adds memory features to existing tasks without importing or converting them.
 
 ## Obsidian
 
@@ -92,6 +105,15 @@ Obsidian optionally reads/edits linked Markdown. Existing agent-memory also supp
 ## Verification
 
 Fifteen fake-executable checks originally covered scope preservation, source headers, errors, explicit capture, and deduplication. A disposable board also verified one real research search, source read, and evidence attachment with hash/location using installed amem. External sources were not changed; sync and actual capture were not run. No plugin was installed in the user's default board. See [verification](verification.md).
+
+On October 16, 2026, the fake-executable suite grew to 24 checks covering `verify`, capture scope and source links, literal leading dashes, and error codes. A second check used the installed amem engine with a disposable amem home (`amem --home`, synthetic demo documents) and a disposable board:
+
+- `attach` filled the artifact's `provider`, `locator`, and `verified_at` fields and stored the search query.
+- `verify` reported `current`. After the synthetic source was edited and the disposable home resynced, it reported `unreadable` with amem's "Document changed since search" message and found a candidate on the same path.
+- Attaching that candidate added a second artifact with the new hash, and `verify` reported `current` for it.
+- `capture` wrote one private inbox card with scope `project:agent-workboard`, a source naming the task and artifact, and the literal title `-verbose` and body `--help`. A retry with the same request ID wrote nothing new. Passing both `project` and `domain` returned `INVALID_REQUEST`.
+
+The user's amem home, index, and inbox were not used. Capture into a real user inbox and its review flow remain unverified.
 
 ## Rust port criteria
 
