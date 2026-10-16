@@ -65,9 +65,9 @@ actor WorkboardClient {
             let message = envelope["error"]["message"].string ?? envelope["error"].string ?? "Could not process the request."
             let code = envelope["error"]["code"].string ?? ""
             if code.lowercased().contains("conflict") || code.lowercased().contains("revision") {
-                throw WorkboardError(message: "The task was changed elsewhere. Read the latest version before retrying.\n\(message)")
+                throw WorkboardError(message: "The task was changed elsewhere. Read the latest version before retrying.\n\(message)", code: code)
             }
-            throw WorkboardError(message: message)
+            throw WorkboardError(message: message, code: code)
         }
         if process.terminationStatus != 0 { throw WorkboardError(message: "The request exited with code \(process.terminationStatus).") }
         return envelope["result"] == .null ? envelope : envelope["result"]

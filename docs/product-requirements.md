@@ -18,6 +18,7 @@ People and CLI-based agents share the same task state. The user sees current and
 | Google Workspace | Center on Calendar: create deadlines or scheduled work and import selected meetings as kanban tasks. Search, attach, or import Gmail messages. Enable services independently. |
 | Slack | Search and read messages, attach them, or import tasks/subtasks. Separately enable sending to post selected task status to a specified channel. |
 | Orca | Browse local worktrees and terminals, import tasks/subtasks, and launch agents from the board. Preserve assignees, run IDs, retries, and terminal links. Terminal exit does not complete a task. |
+| GitHub | Browse and search issues and pull requests in connected repositories, import tasks/subtasks or attach items, and check linked status without changing task status. Separately enable writing to comment task status or create an issue after a preview. |
 | Obsidian | No runtime dependency. Reading Markdown through Obsidian is optional. |
 | Project language | Documentation, source comments, UI, CLI help, diagnostics, examples, fixtures, and commits use English. User task data may use any language. |
 
@@ -28,7 +29,7 @@ First run asks only for information needed to create projects and tasks. Plugin 
 | Distribution | Features |
 | --- | --- |
 | Core | Tasks and subtasks, deadlines and schedules, runs, CLI, personalized kanban app, widget, task search, file/URL attachments, backups, exports |
-| Separate plugins | agent-memory, Google Workspace, Slack, Orca, and future external services |
+| Separate plugins | agent-memory, Google Workspace, Slack, Orca, GitHub, and future external services |
 
 The core contains only plugin state management and the shared request boundary. Uninstalled or disabled plugins must not load or execute code, discover executables, access accounts, synchronize, or run background work.
 

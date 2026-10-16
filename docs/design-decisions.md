@@ -13,6 +13,7 @@ Recorded on October 15, 2026. User requirements are distinct from initial implem
 - Separately installed integrations, including agent-memory and Google Workspace; no dedicated integration code or dependencies in the core distribution.
 - Calendar-centered Google Workspace integration for deadlines and meetings, plus Gmail search and task attachments.
 - Slack search, source verification, attachments/imports, and selected task-status sending.
+- GitHub issue and pull request browsing, imports/attachments, read-only linked status, and separately enabled status comments and issue creation.
 - A simple UI with personal themes, accents, text size, density, and visibility settings.
 - An Orca project for the collected design material, with optional worktree and agent integration.
 - English-only project materials and a fresh English-only Git history.
@@ -32,6 +33,7 @@ Recorded on October 15, 2026. User requirements are distinct from initial implem
 | amem through an optional CLI plugin | Preserve standalone use and existing memory policy. | Add other memory providers through the same boundary. |
 | Calendar and Gmail in Workspace plugin | Install only when needed; choose per-service permissions. | Real-account workflows and conflict tests identify changes. |
 | Slack package with imported User Token | Reuse the shared contract, isolate user search permissions, separately enable sending with host-read tasks. | Real workspace search/sending justify broader OAuth installation or refresh support. |
+| GitHub package with gh sign-in or imported token | Reuse an existing gh sign-in or a personal access token in Keychain without OAuth app setup; scope every call to configured repositories; separately enable previewed writes with a verified account. | GitHub Enterprise, GitHub App installation, or real-account use justify another authentication path. |
 | Isolate plugin failure/disable/removal | Keep tasks resumable and preserve data without integrations. | Every added integration must continue passing standalone checks. |
 | Separate Rust port of Python amem | Avoid coupling board delivery to memory-engine compatibility. | Measurements and search-quality checks demonstrate a benefit. |
 | Optional Obsidian | Independent CLI/app and portable Markdown. | A vault-centered source becomes an actual user requirement. |
@@ -45,4 +47,4 @@ The first proposal considered a Swift core, Swift Argument Parser, GRDB, and XPC
 
 ## Implementation status
 
-The Rust core/service/CLI, SwiftUI app, WidgetKit extension, and separate plugins are implemented and being verified. Transactions, real socket/CLI connections, builds, and local installation have been checked. A second Mac with full Xcode and personal-team signing verified the actual desktop widget and baseline native app interactions. New planning/plugin screens and real Google/Slack accounts retain their own unverified scope. See [verification](verification.md); the memory engine has not been ported.
+The Rust core/service/CLI, SwiftUI app, WidgetKit extension, and separate plugins are implemented and being verified. Transactions, real socket/CLI connections, builds, and local installation have been checked. A second Mac with full Xcode and personal-team signing verified the actual desktop widget and baseline native app interactions. New planning/plugin screens, real Google/Slack accounts, and real GitHub writes retain their own unverified scope. See [verification](verification.md); the memory engine has not been ported.

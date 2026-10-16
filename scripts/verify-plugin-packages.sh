@@ -6,7 +6,7 @@ ARCHIVE_DIR="${2:-${REPO_DIR}/dist}"
 [[ -x "$CLI" ]] || { echo 'The workboard CLI executable to verify is missing.' >&2; exit 1; }
 VERIFY_DIR="$(mktemp -d /tmp/awb-plugin-packages.XXXXXX)"
 trap 'rm -rf "$VERIFY_DIR"' EXIT
-for plugin in agent-memory google-workspace slack orca; do
+for plugin in agent-memory google-workspace slack orca github; do
     VERSION="$(plutil -extract version raw -o - "${REPO_DIR}/plugins/${plugin}/plugin.json")"
     PACKAGE="${plugin}-${VERSION}"
     ARCHIVE="${ARCHIVE_DIR}/AgentWorkboard-plugin-${PACKAGE}.zip"
@@ -29,5 +29,6 @@ done
 [[ "$(plutil -extract result.plugins.1.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
 [[ "$(plutil -extract result.plugins.2.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
 [[ "$(plutil -extract result.plugins.3.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
+[[ "$(plutil -extract result.plugins.4.enabled raw -o - "${VERIFY_DIR}/plugins.json")" == false ]]
 [[ ! -S "${VERIFY_DIR}/s.sock" ]] || { echo 'The installation and disabled-state check started the core task service.' >&2; exit 1; }
 echo 'Separate plugin ZIP checks passed without calling external accounts, amem, or Orca.'
