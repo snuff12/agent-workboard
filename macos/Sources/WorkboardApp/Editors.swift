@@ -31,6 +31,7 @@ struct TaskEditorView: View {
                 }
                 Section {
                     TextField("What needs to be done?", text: $draft.title).font(.title3).focused($titleFocused)
+                    if draft.editingTask == nil { Picker("Status", selection: $draft.status) { ForEach(WorkStatus.allCases.filter(\.acceptsNewTasks)) { Label($0.title, systemImage: $0.symbol).tag($0) } }.accessibilityIdentifier("task.status") }
                     if draft.templateID == nil { Picker("Priority", selection: $draft.priority) { Text("Low").tag(0); Text("Normal").tag(1); Text("High").tag(3) } }
                 } header: { Text("Task") }
                 if let template = store.templates.first(where: { $0.id == draft.templateID }) {
@@ -121,7 +122,7 @@ struct CompleteTaskView: View {
             sheetHeader("Verify the outcome", subtitle: task.title)
             Form {
                 if !task.completionCriteria.isEmpty { Section { Text(task.completionCriteria).font(.callout).textSelection(.enabled) } header: { Text("Completion criteria") } }
-                let unfinished = store.children(of: task).filter { $0.status != .done }
+                let unfinished = store.children(of: task).filter { !$0.status.isClosed }
                 if !unfinished.isEmpty { Label("There are \(unfinished.count) unfinished subtasks.", systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
                 if !task.incompleteRequirements.isEmpty { Label("Check \(task.incompleteRequirements.count) required items first.", systemImage: "checklist").font(.caption).foregroundStyle(.orange) }
                 Section { TextEditor(text: $summary).frame(minHeight: 100).scrollContentBackground(.hidden) } header: { Text("What outcome completed this task?") }

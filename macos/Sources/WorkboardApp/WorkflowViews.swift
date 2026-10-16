@@ -13,7 +13,7 @@ struct TaskListView: View {
     @EnvironmentObject private var store: BoardStore
     @EnvironmentObject private var appearance: AppearanceSettings
     var body: some View {
-        let rows = store.visibleTasks.filter { appearance.theme.showCompleted || $0.status != .done }
+        let rows = store.visibleTasks.filter { appearance.theme.showCompleted || !$0.status.isClosed }
         List(rows) { task in
             Button { Task { await store.openTask(task.id) } } label: {
                 HStack(spacing: 12) {
@@ -25,15 +25,15 @@ struct TaskListView: View {
                             if task.parentID != nil { Label("Subtask", systemImage: "arrow.turn.down.right") }
                             if task.ready { Text("Ready").foregroundStyle(appearance.accent) }
                             if !task.blockedBy.isEmpty { Text("Waiting for \(task.blockedBy.count) prerequisites") }
-                            if task.isStale(days: store.filters.staleDays ?? 14) && task.status != .done { Label("No recent updates", systemImage: "clock") }
+                            if task.isStale(days: store.filters.staleDays ?? 14) && !task.status.isClosed { Label("No recent updates", systemImage: "clock") }
                         }.font(.caption2).foregroundStyle(Color.secondary)
                     }
                     Spacer()
                     if let due = task.dueDate { Text(due, format: .dateTime.month().day()).font(.caption).foregroundStyle(task.isOverdue ? .red : .secondary) }
                     Text(task.assignee ?? "Unspecified").font(.caption).foregroundStyle(Color.secondary).frame(width: 90, alignment: .trailing)
-                    Text(task.status.title).font(.caption).foregroundStyle(Color.secondary).frame(width: 55)
+                    Text(task.status.title).font(.caption).foregroundStyle(Color.secondary).frame(width: 70)
                 }.padding(.vertical, 7).contentShape(Rectangle())
-            }.buttonStyle(.plain).listRowBackground(store.selectedTaskID == task.id ? appearance.accent.opacity(0.08) : Color.clear)
+            }.buttonStyle(.plain).contextMenu { Button("Delete…", role: .destructive) { store.requestDelete(task) }.disabled(store.isMutating) }.listRowBackground(store.selectedTaskID == task.id ? appearance.accent.opacity(0.08) : Color.clear)
         }.listStyle(.inset).overlay { if rows.isEmpty { ContentUnavailableView("No tasks match these filters", systemImage: "line.3.horizontal.decrease", description: Text("Change the filters or add a task.")) } }
     }
 }

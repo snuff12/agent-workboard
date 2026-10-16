@@ -408,7 +408,7 @@ private struct OrcaBrowserView: View {
                                 }
                                 Button("Run selected task in Orca") { Task { await start(item, task: task) } }
                                     .buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent))
-                                    .disabled(task.status == .done)
+                                    .disabled(task.status.isClosed)
                                 Text("Records the assignee and run on the board, then opens a terminal. Duplicate starts of the same run are prevented. Terminal exit does not complete the task.")
                                     .font(.caption2).foregroundStyle(Color.secondary)
                             }

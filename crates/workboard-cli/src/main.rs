@@ -107,6 +107,23 @@ enum Commands {
         #[command(subcommand)]
         command: agent::AgentCommand,
     },
+    #[command(about = "Review, restore, or permanently delete deleted tasks")]
+    Trash {
+        #[command(subcommand)]
+        command: TrashCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TrashCommand {
+    #[command(about = "List deleted tasks waiting in the trash")]
+    List,
+    #[command(about = "Restore a deleted task with the subtasks deleted alongside it")]
+    Restore { task_id: String },
+    #[command(about = "Permanently delete a task in the trash with its subtasks")]
+    Delete { task_id: String },
+    #[command(about = "Permanently delete every task in the trash")]
+    Empty,
 }
 
 #[derive(Subcommand)]
@@ -136,6 +153,8 @@ struct TaskInput {
     title: String,
     #[arg(long)]
     parent: Option<String>,
+    #[arg(long, help = "Initial status: backlog or todo. Defaults to todo")]
+    status: Option<String>,
     #[arg(long, default_value = "")]
     goal: String,
     #[arg(long, default_value = "")]
@@ -185,7 +204,10 @@ enum TaskCommand {
         goal: Option<String>,
         #[arg(long)]
         completion_criteria: Option<String>,
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "backlog, todo, in_progress, review, done, or canceled. Done requires a completion summary"
+        )]
         status: Option<String>,
         #[arg(long)]
         priority: Option<i64>,
@@ -263,9 +285,7 @@ enum TaskCommand {
     ResumeContext {
         task_id: String,
     },
-    #[command(
-        about = "Delete a task, its runs, and artifact links. Use --with-subtasks to include subtasks"
-    )]
+    #[command(about = "Move a task to the trash. Use --with-subtasks to include subtasks")]
     Delete {
         task_id: String,
         #[arg(long)]
@@ -718,6 +738,7 @@ fn main() {
                     ("project_id", Some(json!(input.project))),
                     ("parent_id", string(input.parent)),
                     ("title", Some(json!(input.title))),
+                    ("status", string(input.status)),
                     ("goal", Some(json!(input.goal))),
                     (
                         "completion_criteria",
@@ -937,6 +958,14 @@ fn main() {
         }
         Commands::Inbox { command } => workflow_request(command.request(), &request_id, cli.json),
         Commands::View { command } => workflow_request(command.request(), &request_id, cli.json),
+        Commands::Trash { command } => match command {
+            TrashCommand::List => ("trash.list".into(), json!({})),
+            TrashCommand::Restore { task_id } => {
+                ("trash.restore".into(), json!({"task_id":task_id}))
+            }
+            TrashCommand::Delete { task_id } => ("trash.purge".into(), json!({"task_id":task_id})),
+            TrashCommand::Empty => ("trash.empty".into(), json!({})),
+        },
         Commands::Plugin { .. } | Commands::Serve | Commands::Agent { .. } => unreachable!(),
     };
     // Agent sessions identify themselves without repeating --agent. Raw `rpc` stays explicit.

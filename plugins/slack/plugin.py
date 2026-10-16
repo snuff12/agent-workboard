@@ -195,7 +195,8 @@ def read_message(params, token, team_id):
 
 
 def status_text(task):
-    states = {"todo": "To do", "in_progress": "In progress", "review": "Review", "done": "Done", "blocked": "Blocked"}
+    states = {"backlog": "Backlog", "todo": "Todo", "in_progress": "In Progress", "review": "In Review",
+              "done": "Done", "canceled": "Canceled", "blocked": "Blocked"}
     # Only selected status fields leave the board; goals, artifacts and evidence remain local.
     lines = ["Agent Workboard · Task status", str(task.get("title", ""))[:300],
              "Status: " + states.get(task.get("status"), str(task.get("status", ""))),

@@ -1,12 +1,18 @@
 # macOS UI and personalization
 
-The SwiftUI app selects projects in a sidebar and moves cards through `To do → In progress → Review → Done`. A right-side detail view shows the goal, completion criteria, assignee, next action, subtasks, artifacts, runs, and events. Do not present sample tasks as real user work. All authored interface text is English; user task content is unrestricted.
+The SwiftUI app selects projects in a sidebar and moves cards through `Backlog → Todo → In Progress → In Review → Done`, with `Canceled` for dropped work. Status names and order follow Linear's default team workflow. A right-side detail view shows the goal, completion criteria, assignee, next action, subtasks, artifacts, runs, and events. Do not present sample tasks as real user work. All authored interface text is English; user task content is unrestricted.
 
 ## Visual principles
 
-Task titles and next actions take priority. Separate columns/cards with thin borders and restrained backgrounds. Status colors remain consistent: gray for To do, blue for In progress, orange for Review, green for Done. Apply the user's accent to selection and primary actions. Pair colors with names and icons.
+Task titles and next actions take priority. Separate columns/cards with thin borders and restrained backgrounds. Status colors remain consistent: gray for Backlog, Todo, and Canceled, told apart by dashed, empty, and crossed icons; blue for In Progress; orange for In Review; green for Done. Apply the user's accent to selection and primary actions. Pair colors with names and icons.
 
-Show ordinary tasks as cards and subtasks in details. Offer a setting to include subtasks on the board, and include them in search. Show completion counts on parent cards/details. Complete the parent separately after verifying its outcome. Moving a task to Done requires an outcome summary.
+Show ordinary tasks as cards and subtasks in details. Offer a setting to include subtasks on the board, and include them in search. Show completion counts on parent cards/details; canceled subtasks leave the count. Complete the parent separately after verifying its outcome. Moving a task to Done requires an outcome summary.
+
+New tasks start in Backlog or Todo. The editor offers both, and the add buttons on those two columns create the task in their column. Later columns follow runs, reviews, and recorded outcomes.
+
+Delete a task from its card or list-row context menu, or from the detail menu. A confirmation names the subtasks that move with it and the agents holding open work, then moves them to Trash. The request carries the revision the confirmation showed, so a task that changed meanwhile is not deleted. The notice that follows offers Undo for a few seconds.
+
+Trash sits at the bottom of the sidebar. It lists each deletion with its project, status, subtask count, and who deleted it and when; search filters it. Restore brings a task back with its subtasks, runs, and links. A subtask deleted on its own waits until its parent is restored. Delete Permanently and Empty Trash ask first and cannot be undone. Nothing leaves the trash automatically.
 
 ## Personalization
 
@@ -16,7 +22,7 @@ Show ordinary tasks as cards and subtasks in details. Offer a setting to include
 | Accent | Seven preset colors and a custom color |
 | Card density | Comfortable, Compact |
 | Text size | 85%–130% in 5% steps |
-| Board visibility | Sidebar, Done column, subtasks |
+| Board visibility | Sidebar, Done and Canceled columns, subtasks |
 | Theme files | Import/export JSON, restore defaults |
 
 Store themes and connection paths in UserDefaults, separately from task data. Theme JSON contains only version, name, appearance, accent, density, text size, and visibility. Exclude paths, accounts, and task bodies. Validate version, color, and size limits before importing.

@@ -7,11 +7,13 @@ import Combine
 @MainActor final class BoardStore: ObservableObject {
     static let todayScope = "@workboard-today"
     static let inboxScope = "@workboard-inbox"
+    static let trashScope = "@workboard-trash"
     @Published var projects: [BoardProject] = []
     @Published var tasks: [BoardTask] = []
     @Published var templates: [TaskTemplate] = []
     @Published var savedViews: [SavedTaskView] = []
     @Published var inbox: [InboxItem] = []
+    @Published var trash: [TrashItem] = []
     @Published var selectedLayout = "board"
     @Published var selectedViewID: String?
     @Published var filters = TaskFilters() { didSet {
@@ -33,6 +35,10 @@ import Combine
     /// The enabled Orca plugin, so cards can link worktrees without opening plugin settings.
     @Published var orcaPlugin: InstalledPlugin?
     @Published var worktreeLinkTask: BoardTask?
+    @Published var deletionTask: BoardTask?
+    @Published var purgeItem: TrashItem?
+    @Published var confirmingEmptyTrash = false
+    @Published var undoDeletion: UndoDeletion?
     @Published var notice: String?
     let appearance: AppearanceSettings
     private let client = WorkboardClient()
@@ -64,6 +70,14 @@ import Combine
     var currentProject: BoardProject? { projects.first { $0.id == selectedProjectID } }
     var isTodayView: Bool { selectedProjectID == Self.todayScope }
     var isInboxView: Bool { selectedProjectID == Self.inboxScope }
+    var isTrashView: Bool { selectedProjectID == Self.trashScope }
+    var trashedTaskCount: Int { trash.reduce(0) { $0 + $1.tasks.count } }
+    /// Permanently deleting an item also removes subtasks that were moved to the trash earlier on their own.
+    func purgeCount(_ item: TrashItem) -> Int {
+        let trashed = trash.flatMap(\.tasks)
+        func below(_ id: String) -> Int { trashed.filter { $0.parentID == id }.reduce(0) { $0 + 1 + below($1.id) } }
+        return 1 + below(item.task.id)
+    }
     var scopedTasks: [BoardTask] {
         var local = filters; local.query = ""
         return tasks.filter {
@@ -80,8 +94,9 @@ import Combine
             return lhs.priority != rhs.priority ? lhs.priority > rhs.priority : lhs.updatedAt > rhs.updatedAt
         }
     }
-    var completionRatio: Double { let all = scopedTasks; return all.isEmpty ? 0 : Double(all.filter { $0.status == .done }.count) / Double(all.count) }
+    var completionRatio: Double { let all = scopedTasks.filter { $0.status != .canceled }; return all.isEmpty ? 0 : Double(all.filter { $0.status == .done }.count) / Double(all.count) }
     func children(of task: BoardTask) -> [BoardTask] { tasks.filter { $0.parentID == task.id }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
+    func descendants(of task: BoardTask) -> [BoardTask] { children(of: task).flatMap { [$0] + descendants(of: $0) } }
     func projectName(for id: String) -> String { projects.first { $0.id == id }?.name ?? "Project" }
     func selectView(_ view: SavedTaskView) {
         selectedViewID = view.id; filters = view.filters; selectedLayout = view.layout; selectedProjectID = nil; searchText = ""
@@ -95,9 +110,9 @@ import Combine
         connectionIdentity = identity; connectionGeneration = UUID()
         eventSequence = nil; widgetConfigurationKey = nil; lastUpdated = nil
         projects = []; tasks = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
-        templates = []; savedViews = []; inbox = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
+        templates = []; savedViews = []; inbox = []; trash = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
         queryResultIDs = nil; queryResultKey = nil
-        draft = nil; completionTask = nil; showingNewProject = false
+        draft = nil; completionTask = nil; deletionTask = nil; purgeItem = nil; confirmingEmptyTrash = false; undoDeletion = nil; showingNewProject = false
         actionError = nil; notice = nil; widgetWarning = nil; connectionError = nil; isLoading = true
         return true
     }
@@ -135,8 +150,9 @@ import Combine
                     if selectedLayout == previousView.layout { selectedLayout = refreshed.layout }
                 }
                 inbox = snapshot["inbox"].array.compactMap(InboxItem.init)
+                trash = snapshot["trash"].array.compactMap(TrashItem.init)
                 if let selectedViewID, !savedViews.contains(where: { $0.id == selectedViewID }) { self.selectedViewID = nil }
-                if let selectedProjectID, ![Self.todayScope, Self.inboxScope].contains(selectedProjectID), !projects.contains(where: { $0.id == selectedProjectID }) { self.selectedProjectID = nil }
+                if let selectedProjectID, ![Self.todayScope, Self.inboxScope, Self.trashScope].contains(selectedProjectID), !projects.contains(where: { $0.id == selectedProjectID }) { self.selectedProjectID = nil }
                 if let pendingDeepLink { self.pendingDeepLink = nil; await openTask(pendingDeepLink) }
                 else if let selectedTaskID {
                     if let current = tasks.first(where: { $0.id == selectedTaskID }) {
@@ -220,17 +236,19 @@ import Combine
         if tasks.contains(where: { $0.id == id }) { Task { await openTask(id) } }
         else { pendingDeepLink = id; Task { await reload(force: true) } }
     }
-    func newTask(parent: BoardTask? = nil) {
+    func newTask(parent: BoardTask? = nil, status: WorkStatus = .todo) {
         guard lastUpdated != nil else { return }
         let projectID = parent?.projectID ?? currentProject?.id ?? projects.first?.id
         guard let projectID else { showingNewProject = true; return }
         draft = TaskDraft(projectID: projectID, parentID: parent?.id)
+        draft?.status = status.acceptsNewTasks ? status : .todo
         draft?.workflowContext = workflowContext
     }
     func save(_ draft: TaskDraft) async -> Bool {
         if let templateID = draft.templateID, draft.editingTask == nil {
             var params: [String: JSONValue] = ["template_id": .string(templateID), "project_id": .string(draft.projectID), "title": .string(draft.title.trimmingCharacters(in: .whitespacesAndNewlines))]
             if let parentID = draft.parentID { params["parent_id"] = .string(parentID) }
+            if draft.status != .todo { params["status"] = .string(draft.status.rawValue) }
             if let revision = draft.templateRevision { params["expected_revision"] = .number(Double(revision)) }
             guard let result = await workflowMutation("template.apply", params: params, context: draft.workflowContext) else { return false }
             self.draft = nil
@@ -249,6 +267,7 @@ import Combine
         } else {
             method = "task.create"; params["project_id"] = .string(draft.projectID)
             if let parentID = draft.parentID { params["parent_id"] = .string(parentID) }
+            if draft.status != .todo { params["status"] = .string(draft.status.rawValue) }
         }
         let success = await workflowMutation(method, params: params, context: draft.workflowContext) != nil
         if success { self.draft = nil }
@@ -267,14 +286,51 @@ import Combine
         let method: String
         switch status {
         case .inProgress:
-            if task.status == .done { method = "task.update"; params["status"] = .string("todo") }
+            // A closed task reopens to Todo first; starting it then records a new run.
+            if task.status.isClosed { method = "task.update"; params["status"] = .string("todo") }
             else { method = "task.start"; params["agent_id"] = .string(task.assignee ?? "user") }
         case .review: method = "task.review"
-        case .todo: method = "task.update"; params["status"] = .string(status.rawValue)
+        case .backlog, .todo, .canceled: method = "task.update"; params["status"] = .string(status.rawValue)
         case .done: return
         }
         let changed = await mutate(method, params: params)
-        if changed && task.status == .done && status == .inProgress, let reopened = tasks.first(where: { $0.id == task.id }) { await move(reopened, to: .inProgress) }
+        if changed && task.status.isClosed && status == .inProgress, let reopened = tasks.first(where: { $0.id == task.id }) { await move(reopened, to: .inProgress) }
+    }
+    func requestDelete(_ task: BoardTask) {
+        guard lastUpdated != nil, !isMutating else { return }
+        deletionTask = task
+    }
+    /// Moves the task and the subtasks the confirmation listed to the trash. The service rejects the
+    /// request if the task changed after the confirmation was shown.
+    @discardableResult func delete(_ task: BoardTask) async -> Bool {
+        let subtasks = descendants(of: task)
+        var params: [String: JSONValue] = ["task_id": .string(task.id), "expected_revision": .number(Double(task.revision))]
+        if !subtasks.isEmpty { params["with_subtasks"] = .bool(true) }
+        guard let result = await workflowMutation("task.delete", params: params) else { return false }
+        let moved = max(result["deleted_task_ids"].array.count, 1)
+        let message = moved == 1 ? "Moved to Trash." : "Task and \(moved - 1) subtasks moved to Trash."
+        notice = message; undoDeletion = UndoDeletion(notice: message, taskID: task.id)
+        return true
+    }
+    /// Restores a deletion, with the subtasks deleted alongside it.
+    @discardableResult func restore(_ taskID: String) async -> Bool {
+        undoDeletion = nil
+        guard let result = await workflowMutation("trash.restore", params: ["task_id": .string(taskID)]) else { return false }
+        let restored = max(result["restored_task_ids"].array.count, 1)
+        notice = restored == 1 ? "Task restored." : "Task and \(restored - 1) subtasks restored."
+        return true
+    }
+    @discardableResult func purge(_ item: TrashItem) async -> Bool {
+        let params: [String: JSONValue] = ["task_id": .string(item.task.id), "expected_revision": .number(Double(item.task.revision))]
+        guard await workflowMutation("trash.purge", params: params) != nil else { return false }
+        notice = "Deleted permanently."
+        return true
+    }
+    @discardableResult func emptyTrash() async -> Bool {
+        guard let result = await workflowMutation("trash.empty", params: [:]) else { return false }
+        let removed = result["deleted_task_ids"].array.count
+        notice = removed == 1 ? "Trash emptied: 1 task deleted permanently." : "Trash emptied: \(removed) tasks deleted permanently."
+        return true
     }
     func complete(_ task: BoardTask, summary: String) async -> Bool {
         let success = await mutate("task.complete", params: ["task_id": .string(task.id), "expected_revision": .number(Double(task.revision)), "summary": .string(summary)])

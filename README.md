@@ -19,9 +19,10 @@ The agent-memory plugin searches existing documents and memories and submits exp
 Slack provides message search, source reading, attachments, and task imports. Separately enable sending to post a selected task's status to a specified channel. See [Slack setup](docs/slack.md). Real-account search and sending have not yet been verified.
 
 Linear provides issue search, source reading, attachments, and task/subtask imports. Separately enable status comments to post a selected task's status on an issue, and state changes to move an issue to a chosen workflow state. See [Linear setup](docs/linear.md). Real-account use has not yet been verified.
+
 GitHub browses and searches issues and pull requests in connected github.com repositories, imports or attaches them to tasks, and checks the status of linked items without changing task status. Separately enable writing to comment a task's status or create an issue after previewing the exact text. See [GitHub](docs/github.md). Real-account comments and issue creation have not been performed.
 
-The default UI is a simple kanban board. Save light, dark, or system appearance, accent color, text size, card density, and display preferences. Import and export custom themes as JSON.
+The default UI is a simple kanban board with Linear's workflow columns: Backlog, Todo, In Progress, In Review, Done, and Canceled. Deleted cards wait in Trash until you restore them or empty it. Save light, dark, or system appearance, accent color, text size, card density, and display preferences. Import and export custom themes as JSON.
 
 ## Planning workflows
 
@@ -105,9 +106,9 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 
 ## Everyday workflow
 
-Create projects and subtasks through the CLI without plugins. Assign a task and start a run to show it as In progress in the app. The widget shows current work, tasks due today, and work completed today. Another agent can continue from artifacts, next actions, and attached files or URLs.
+Create projects and subtasks through the CLI without plugins. Park unplanned work in Backlog, where agents' ready lists skip it. Assign a task and start a run to show it as In Progress in the app. The widget shows current work, tasks due today, and work completed today. Another agent can continue from artifacts, next actions, and attached files or URLs.
 
-The shared plugin host and all five integration packages are implemented. Plugin failures, disabling, and removal preserve existing task data. See the verification record for the tested scope.
+The shared plugin host and all six integration packages are implemented. Plugin failures, disabling, and removal preserve existing task data. See the verification record for the tested scope.
 
 Claude Code and Codex sessions can connect to the board with the optional agent kit: `scripts/install-agent-kit.sh` installs a plugin per tool that adds board context at session start and the agent protocol as a skill. See [Agent integration](docs/agent-integration.md).
 

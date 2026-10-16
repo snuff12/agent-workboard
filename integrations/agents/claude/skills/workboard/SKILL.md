@@ -13,6 +13,7 @@ The board is the shared record of work for people and agents on this Mac. Use th
 - Work on a board task only when the user's request clearly matches it or the user asks you to. Then claim and start it, and keep the returned run ID:
   `workboard task claim <task-id>` and `workboard task start <task-id> --json`.
 - Do not take over a task that another agent holds. Tell the user instead.
+- Backlog holds work the user has not planned yet, and ready lists skip it. Leave Backlog and Canceled tasks alone unless the user points you to one.
 - Except for work from a source message (below), do not create, claim, or change tasks for ordinary requests that do not match board work. When you find follow-up work outside the current request, capture it for the user to sort: `workboard inbox capture --title "<follow-up>" --note "<context>"`.
 
 ## Work from a Slack message or another source
@@ -46,4 +47,4 @@ When the user asks for work based on a Slack message, email, issue, or document,
 
 ## Never
 
-Do not delete board data, restore backups, run or change plugins, or edit the board database unless the user explicitly asks.
+Do not cancel or delete tasks, restore or empty the trash, delete other board data, restore backups, run or change plugins, or edit the board database unless the user explicitly asks.

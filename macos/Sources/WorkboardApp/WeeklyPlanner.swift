@@ -117,7 +117,7 @@ struct WeeklyPlannerView: View {
     private let minuteHeight: CGFloat = 0.75
     private var zone: String { appearance.plannerTimeZone }
     private var days: [Date] { PlannerClock.days(containing: anchor, zone: zone) }
-    private var tasks: [BoardTask] { store.visibleTasks.filter { $0.status != .done } }
+    private var tasks: [BoardTask] { store.visibleTasks.filter { !$0.status.isClosed } }
     private var entries: [PlannerEntry] {
         let local = tasks.compactMap { task -> PlannerEntry? in
             guard let interval = PlannerClock.interval(start: task.scheduledStart, end: task.scheduledEnd, zone: task.timeZone) else { return nil }

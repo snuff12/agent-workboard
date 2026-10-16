@@ -12,8 +12,9 @@ use std::{
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 5;
+pub const DATABASE_VERSION: u32 = 6;
 
+mod trash;
 mod workflow;
 pub use workflow::ChecklistItem;
 
@@ -136,6 +137,14 @@ pub struct Task {
     pub ready: bool,
     #[serde(default)]
     pub checklist: Vec<ChecklistItem>,
+    /// Set while the task waits in the trash. Live reads never return trashed tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    /// Groups a task with the subtasks deleted in the same request, so they restore together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_by: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Artifact {
@@ -245,12 +254,27 @@ fn integer(p: &Value, key: &str, fallback: i64) -> Result<i64, ApiError> {
             .ok_or_else(|| invalid(format!("{key} must be an integer"))),
     }
 }
+/// Workflow states in board order, following Linear's default team workflow.
+pub const TASK_STATUSES: [&str; 6] = [
+    "backlog",
+    "todo",
+    "in_progress",
+    "review",
+    "done",
+    "canceled",
+];
 fn status(s: &str) -> Result<(), ApiError> {
-    if ["todo", "in_progress", "review", "done"].contains(&s) {
+    if TASK_STATUSES.contains(&s) {
         Ok(())
     } else {
-        Err(invalid("Status must be todo, in_progress, review, or done"))
+        Err(invalid(
+            "Status must be backlog, todo, in_progress, review, done, or canceled",
+        ))
     }
+}
+/// Done and Canceled close a task: it no longer blocks dependents or counts as open work.
+fn is_closed(s: &str) -> bool {
+    s == "done" || s == "canceled"
 }
 
 fn validate_widget_path(data_dir: &Path, path: &Path) -> Result<PathBuf, ApiError> {
@@ -692,7 +716,7 @@ impl Board {
             tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
             for (table,columns) in [
                 ("projects","id,name,directory,created_at"),
-                ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone"),
+                ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by"),
                 ("runs","id,task_id,agent_id,status,started_at,ended_at,summary,next_action"),
                 ("artifacts","id,task_id,run_id,path,kind,description,created_at,locator,provider,verified_at,metadata"),
                 ("task_dependencies","task_id,depends_on_id"),
@@ -758,7 +782,7 @@ impl Board {
         let artifacts = all_artifacts(&self.conn, None)?;
         let runs = all_runs(&self.conn, None)?;
         let events = events(&self.conn, 0)?;
-        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"artifacts":artifacts,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
+        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"trash":state["trash"],"artifacts":artifacts,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
         let format = optional(p, "format")?.unwrap_or_else(|| "json".into());
         let content = match format.as_str() {
             "json" => serde_json::to_string_pretty(&document)?,
@@ -858,8 +882,77 @@ PRAGMA user_version=4;
 COMMIT;
 "#)?;
     }
-    workflow::migrate(conn)?;
+    if version < 5 {
+        workflow::migrate(conn)?;
+    }
+    if version < 6 {
+        add_workflow_states_and_trash(conn)?;
+    }
     Ok(())
+}
+
+/// Version 6 adds Backlog, Canceled, and the trash. SQLite cannot change a CHECK constraint in
+/// place, so the tasks table is rebuilt. Rows keep their rowids, which the external-content search
+/// index uses.
+fn add_workflow_states_and_trash(conn: &Connection) -> Result<(), ApiError> {
+    let foreign_keys: bool = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0))?;
+    // Replacing a referenced table requires foreign keys off; the check below runs before commit.
+    conn.execute_batch("PRAGMA foreign_keys=OFF")?;
+    let rebuilt = (|| -> Result<(), ApiError> {
+        conn.execute_batch(r#"
+BEGIN IMMEDIATE;
+CREATE TABLE tasks_v6 (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), parent_id TEXT REFERENCES tasks(id),
+ title TEXT NOT NULL, goal TEXT NOT NULL DEFAULT '', completion_criteria TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('backlog','todo','in_progress','review','done','canceled')),
+ priority INTEGER NOT NULL DEFAULT 0, assignee TEXT, next_action TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, blocked_reason TEXT NOT NULL DEFAULT '', completion_summary TEXT NOT NULL DEFAULT '', claimed_at TEXT,
+ due_at TEXT, scheduled_start TEXT, scheduled_end TEXT, time_zone TEXT NOT NULL DEFAULT 'UTC',
+ deleted_at TEXT, deletion_id TEXT, deleted_by TEXT,
+ CHECK(parent_id IS NULL OR parent_id <> id), CHECK((deleted_at IS NULL) = (deletion_id IS NULL))
+);
+INSERT INTO tasks_v6(rowid,id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone)
+ SELECT rowid,id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone FROM tasks;
+DROP TABLE tasks;
+ALTER TABLE tasks_v6 RENAME TO tasks;
+CREATE INDEX tasks_project ON tasks(project_id);
+CREATE INDEX tasks_parent ON tasks(parent_id);
+CREATE INDEX tasks_deletion ON tasks(deletion_id);
+CREATE TRIGGER task_search_insert AFTER INSERT ON tasks BEGIN
+ INSERT INTO task_fts(rowid,title,goal,completion_criteria,next_action) VALUES (new.rowid,new.title,new.goal,new.completion_criteria,new.next_action);
+END;
+CREATE TRIGGER task_search_delete AFTER DELETE ON tasks BEGIN
+ INSERT INTO task_fts(task_fts,rowid,title,goal,completion_criteria,next_action) VALUES('delete',old.rowid,old.title,old.goal,old.completion_criteria,old.next_action);
+END;
+CREATE TRIGGER task_search_update AFTER UPDATE ON tasks BEGIN
+ INSERT INTO task_fts(task_fts,rowid,title,goal,completion_criteria,next_action) VALUES('delete',old.rowid,old.title,old.goal,old.completion_criteria,old.next_action);
+ INSERT INTO task_fts(rowid,title,goal,completion_criteria,next_action) VALUES (new.rowid,new.title,new.goal,new.completion_criteria,new.next_action);
+END;
+INSERT INTO task_fts(task_fts) VALUES('rebuild');
+PRAGMA user_version=6;
+"#)?;
+        let violations: i64 =
+            conn.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })?;
+        if violations > 0 {
+            return Err(ApiError::new(
+                "DATABASE_CORRUPT",
+                "The task table could not be upgraded because it contains invalid references",
+            ));
+        }
+        conn.execute_batch("COMMIT")?;
+        Ok(())
+    })();
+    if rebuilt.is_err() && !conn.is_autocommit() {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    conn.execute_batch(if foreign_keys {
+        "PRAGMA foreign_keys=ON"
+    } else {
+        "PRAGMA foreign_keys=OFF"
+    })?;
+    rebuilt
 }
 
 fn allocate_revision(c: &Connection, task_id: &str, current: i64) -> Result<i64, ApiError> {
@@ -928,7 +1021,7 @@ fn record(
     c.execute("INSERT INTO events(request_id,task_id,kind,actor,created_at,data) VALUES (?1,?2,?3,?4,?5,?6)",params![r.request_id,task,kind,actor,now(),serde_json::to_string(&data)?])?;
     Ok(c.last_insert_rowid())
 }
-const TASK_SELECT: &str = "SELECT id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone FROM tasks";
+const TASK_SELECT: &str = "SELECT id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by FROM tasks";
 fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let claimed_at: Option<String> = r.get(15)?;
     let expires = claimed_at
@@ -964,14 +1057,30 @@ fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         blocked_by: vec![],
         ready: false,
         checklist: vec![],
+        deleted_at: r.get(20)?,
+        deletion_id: r.get(21)?,
+        deleted_by: r.get(22)?,
     })
 }
+/// A live task. A task in the trash reads as missing until it is restored.
 fn get_task(c: &Connection, id: &str) -> Result<Task, ApiError> {
-    let task = c
-        .query_row(&format!("{TASK_SELECT} WHERE id=?1"), [id], task_row)
-        .optional()?
-        .ok_or_else(|| ApiError::new("NOT_FOUND", "Task not found"))?;
+    let task = task_record(c, id)?;
+    if task.deleted_at.is_some() {
+        return Err(ApiError::new(
+            "NOT_FOUND",
+            "The task is in the trash. Restore it before using it",
+        ));
+    }
     workflow::enrich_task(c, task)
+}
+/// A live or trashed task.
+fn get_any_task(c: &Connection, id: &str) -> Result<Task, ApiError> {
+    workflow::enrich_task(c, task_record(c, id)?)
+}
+fn task_record(c: &Connection, id: &str) -> Result<Task, ApiError> {
+    c.query_row(&format!("{TASK_SELECT} WHERE id=?1"), [id], task_row)
+        .optional()?
+        .ok_or_else(|| ApiError::new("NOT_FOUND", "Task not found"))
 }
 fn projects(c: &Connection) -> Result<Vec<Project>, ApiError> {
     let mut st =
@@ -989,7 +1098,7 @@ fn projects(c: &Connection) -> Result<Vec<Project>, ApiError> {
 fn list_tasks(c: &Connection, p: &Value) -> Result<Vec<Task>, ApiError> {
     let resolved = workflow::resolve_filters(c, p)?;
     let p = &resolved;
-    let mut sql = format!("{TASK_SELECT} WHERE 1=1");
+    let mut sql = format!("{TASK_SELECT} WHERE deleted_at IS NULL");
     let mut args: Vec<String> = vec![];
     for (key, col) in [("project_id", "project_id"), ("status", "status")] {
         if let Some(value) = optional(p, key)? {
@@ -1088,20 +1197,22 @@ fn events(c: &Connection, after: i64) -> Result<Vec<Event>, ApiError> {
 }
 fn snapshot(c: &Connection) -> Result<Value, ApiError> {
     Ok(
-        json!({"projects":projects(c)?,"tasks":list_tasks(c,&json!({}))?,"templates":workflow::templates(c)?,"views":workflow::views(c)?,"inbox":workflow::inbox(c,&json!({}))?,"event_sequence":sequence(c)?}),
+        json!({"projects":projects(c)?,"tasks":list_tasks(c,&json!({}))?,"trash":trash::items(c)?,"templates":workflow::templates(c)?,"views":workflow::views(c)?,"inbox":workflow::inbox(c,&json!({}))?,"event_sequence":sequence(c)?}),
     )
 }
 fn task_detail(c: &Connection, id: &str) -> Result<Value, ApiError> {
     let task = get_task(c, id)?;
     let children = list_tasks(c, &json!({"parent_id":id}))?;
     let completed = children.iter().filter(|x| x.status == "done").count();
+    let canceled = children.iter().filter(|x| x.status == "canceled").count();
     Ok(
-        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"artifacts":all_artifacts(c,Some(id))?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?}),
+        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"canceled_child_count":canceled,"artifacts":all_artifacts(c,Some(id))?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?}),
     )
 }
 fn read_method(c: &Connection, method: &str, p: &Value) -> Result<Value, ApiError> {
     match method {
         "template.list" => Ok(json!({"templates":workflow::templates(c)?})),
+        "trash.list" => Ok(json!({"items":trash::items(c)?})),
         "view.list" => Ok(json!({"views":workflow::views(c)?})),
         "inbox.list" => Ok(json!({"items":workflow::inbox(c,p)?})),
         "task.schedule.preview" => workflow::schedule_preview(c, p),
@@ -1169,6 +1280,9 @@ fn is_mutation(method: &str) -> bool {
             | "task.pause"
             | "task.heartbeat"
             | "task.delete"
+            | "trash.restore"
+            | "trash.purge"
+            | "trash.empty"
             | "run.update"
             | "run.finish"
     )
@@ -1209,9 +1323,15 @@ fn validate_parent(
     }
     Ok(())
 }
-/// The task and every descendant, root first. Parent links never form a cycle.
-fn subtree(c: &Connection, root: &str) -> Result<Vec<Task>, ApiError> {
-    let mut st = c.prepare(&format!("WITH RECURSIVE tree(id) AS (SELECT ?1 UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_id=tree.id) {TASK_SELECT} WHERE id IN (SELECT id FROM tree)"))?;
+/// The task and every descendant, root first. Parent links never form a cycle. Descendants of a
+/// trashed task are always trashed too, because live tasks cannot be created or moved under it.
+fn subtree(c: &Connection, root: &str, include_trashed: bool) -> Result<Vec<Task>, ApiError> {
+    let live = if include_trashed {
+        ""
+    } else {
+        " AND deleted_at IS NULL"
+    };
+    let mut st = c.prepare(&format!("WITH RECURSIVE tree(id) AS (SELECT ?1 UNION ALL SELECT t.id FROM tasks t JOIN tree ON t.parent_id=tree.id) {TASK_SELECT} WHERE id IN (SELECT id FROM tree){live}"))?;
     let mut tasks = st
         .query_map([root], task_row)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -1238,13 +1358,13 @@ fn check_owners(tasks: &[Task], actor: &Option<String>) -> Result<(), ApiError> 
         None => Ok(()),
     }
 }
-/// Removes tasks with their runs and artifacts and returns every removed row for the deletion event,
-/// so history still shows what was attached. Each task keeps a revision tombstone above its last
-/// revision so a later restore or retry never reuses an older version.
+/// Permanently removes tasks with their runs and artifacts and returns every removed row for the
+/// event, so history still shows what was attached. Each task keeps a revision tombstone above its
+/// last revision so a later restore or retry never reuses an older version.
 fn delete_tasks(c: &Connection, tasks: &[Task]) -> Result<Value, ApiError> {
     let tasks = tasks
         .iter()
-        .map(|task| get_task(c, &task.id))
+        .map(|task| get_any_task(c, &task.id))
         .collect::<Result<Vec<_>, _>>()?;
     let ids: Vec<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
     let (mut runs, mut artifacts) = (Vec::new(), Vec::new());
@@ -1337,16 +1457,28 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             .find(|project| project.id == project_id)
             .ok_or_else(|| ApiError::new("NOT_FOUND", "Project not found"))?;
         let tasks = list_tasks(c, &json!({"project_id":project_id}))?;
-        if !tasks.is_empty() && !with_tasks {
+        let trashed = trash::project_tasks(c, project_id)?;
+        let has_tasks = !tasks.is_empty() || !trashed.is_empty();
+        if has_tasks && !with_tasks {
             return Err(ApiError::new(
                 "HAS_TASKS",
-                format!(
-                    "The project contains {} tasks. Specify with_tasks to delete them",
-                    tasks.len()
-                ),
+                if trashed.is_empty() {
+                    format!(
+                        "The project contains {} tasks. Specify with_tasks to delete them",
+                        tasks.len()
+                    )
+                } else {
+                    format!(
+                        "The project contains {} tasks and {} in the trash. Specify with_tasks to delete them permanently",
+                        tasks.len(),
+                        trashed.len()
+                    )
+                },
             ));
         }
         check_owners(&tasks, &optional(p, "agent_id")?)?;
+        // Deleting a project is permanent, including tasks already in the trash.
+        let tasks: Vec<Task> = tasks.into_iter().chain(trashed).collect();
         let deleted: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
         let removed = delete_tasks(c, &tasks)?;
         c.execute("DELETE FROM projects WHERE id=?1", [project_id])?;
@@ -1379,7 +1511,7 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             title: required(p, "title")?.trim().into(),
             goal: string(p, "goal")?,
             completion_criteria: string(p, "completion_criteria")?,
-            status: "todo".into(),
+            status: optional(p, "status")?.unwrap_or_else(|| "todo".into()),
             priority: integer(p, "priority", 0)?,
             assignee: None,
             next_action: string(p, "next_action")?,
@@ -1399,13 +1531,22 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             blocked_by: vec![],
             ready: true,
             checklist: vec![],
+            deleted_at: None,
+            deletion_id: None,
+            deleted_by: None,
         };
+        if !["backlog", "todo"].contains(&t.status.as_str()) {
+            return Err(invalid("New tasks start in backlog or todo"));
+        }
         validate_schedule(&t)?;
         validate_parent(c, &t.id, &t.project_id, &t.parent_id)?;
         t.revision = allocate_revision(c, &t.id, 0)?;
         c.execute("INSERT INTO tasks(id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",params![t.id,t.project_id,t.parent_id,t.title,t.goal,t.completion_criteria,t.status,t.priority,t.assignee,t.next_action,t.revision,t.created_at,t.updated_at,t.blocked_reason,t.completion_summary,t.claimed_at,t.due_at,t.scheduled_start,t.scheduled_end,t.time_zone])?;
         let seq = record(c, r, Some(&t.id), "task.created", json!(t))?;
         return result_task(c, &t, seq);
+    }
+    if let Some(result) = trash::mutate(c, r)? {
+        return Ok(result);
     }
     let task_id = required(p, "task_id")?;
     let mut t = get_task(c, task_id)?;
@@ -1425,7 +1566,7 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
     }
     if r.method == "task.delete" {
         let with_subtasks = flag(p, "with_subtasks")?;
-        let tasks = subtree(c, task_id)?;
+        let tasks = subtree(c, task_id, false)?;
         if tasks.len() > 1 && !with_subtasks {
             return Err(ApiError::new(
                 "HAS_SUBTASKS",
@@ -1437,15 +1578,17 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
         }
         check_owners(&tasks, &actor)?;
         let deleted: Vec<String> = tasks.iter().map(|t| t.id.clone()).collect();
-        let removed = delete_tasks(c, &tasks)?;
+        let trashed = trash::move_to_trash(c, &tasks, actor.as_deref())?;
         let seq = record(
             c,
             r,
             Some(task_id),
             "task.deleted",
-            json!({"task":t,"removed":removed}),
+            json!({"task":t,"trashed":trashed}),
         )?;
-        return Ok(json!({"task_id":task_id,"deleted_task_ids":deleted,"event_sequence":seq}));
+        return Ok(
+            json!({"task_id":task_id,"deleted_task_ids":deleted,"in_trash":true,"deletion_id":trashed["deletion_id"],"event_sequence":seq}),
+        );
     }
     let mut extra = json!({});
     match r.method.as_str() {
@@ -1523,6 +1666,12 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
                     "A completed task cannot be claimed",
                 ));
             }
+            if t.status == "canceled" {
+                return Err(ApiError::new(
+                    "INVALID_STATE",
+                    "A canceled task cannot be claimed. Reopen it first",
+                ));
+            }
             if t.assignee.is_some() && t.assignee.as_deref() != Some(agent) {
                 return Err(ApiError::new(
                     "CLAIM_CONFLICT",
@@ -1551,10 +1700,14 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             c.execute("UPDATE runs SET status='interrupted',ended_at=?2 WHERE task_id=?1 AND status='running'",params![task_id,now()])?;
         }
         "task.start" => {
-            if t.status == "done" {
+            if is_closed(&t.status) {
                 return Err(ApiError::new(
                     "INVALID_STATE",
-                    "Reopen the completed task first",
+                    if t.status == "done" {
+                        "Reopen the completed task first"
+                    } else {
+                        "Reopen the canceled task first"
+                    },
                 ));
             }
             let agent = actor
@@ -1980,6 +2133,21 @@ fn markdown(doc: &Value) -> String {
             }
             out.push('\n');
         }
+    }
+    if let Some(items) = doc["trash"].as_array().filter(|items| !items.is_empty()) {
+        out.push_str("## Trash\n\n");
+        for item in items {
+            let task = &item["task"];
+            out.push_str(&format!(
+                "- {} (ID {}) · deleted {} by {} · {} subtasks\n",
+                task["title"].as_str().unwrap_or(""),
+                task["id"].as_str().unwrap_or(""),
+                item["deleted_at"].as_str().unwrap_or(""),
+                item["deleted_by"].as_str().unwrap_or("user"),
+                item["subtask_count"].as_u64().unwrap_or(0)
+            ));
+        }
+        out.push('\n');
     }
     workflow::markdown(doc, &mut out);
     out

@@ -123,7 +123,8 @@ CREATE TABLE workflow_revisions(kind TEXT NOT NULL,id TEXT NOT NULL,revision INT
 }
 
 pub(super) fn enrich_task(c: &Connection, mut task: Task) -> Result<Task, ApiError> {
-    let mut st = c.prepare("SELECT d.depends_on_id,t.status FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_id WHERE d.task_id=?1 ORDER BY d.depends_on_id")?;
+    // A prerequisite in the trash neither shows nor blocks; restoring it brings the link back.
+    let mut st = c.prepare("SELECT d.depends_on_id,t.status FROM task_dependencies d JOIN tasks t ON t.id=d.depends_on_id WHERE d.task_id=?1 AND t.deleted_at IS NULL ORDER BY d.depends_on_id")?;
     let pairs = st
         .query_map([&task.id], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -132,7 +133,7 @@ pub(super) fn enrich_task(c: &Connection, mut task: Task) -> Result<Task, ApiErr
     task.dependency_ids = pairs.iter().map(|p| p.0.clone()).collect();
     task.blocked_by = pairs
         .into_iter()
-        .filter(|p| p.1 != "done")
+        .filter(|p| !is_closed(&p.1))
         .map(|p| p.0)
         .collect();
     task.ready = task.status == "todo"
@@ -454,7 +455,7 @@ pub(super) fn detach_deleted_tasks(c: &Connection, tasks: &[Task]) -> Result<Val
         )?;
     }
     for key in &survivors {
-        let mut task = get_task(c, key)?;
+        let mut task = get_any_task(c, key)?;
         task.revision = allocate_revision(c, key, task.revision)?;
         task.updated_at = now();
         save_task(c, &task)?;
@@ -533,7 +534,7 @@ fn apply_node(
         schema_version: SCHEMA_VERSION,
         request_id: r.request_id.clone(),
         method: "task.create".into(),
-        params: json!({"project_id":project,"parent_id":parent,"title":node.title,"goal":node.goal,"completion_criteria":node.completion_criteria,"priority":node.priority,"agent_id":optional(&r.params,"agent_id")?}),
+        params: json!({"project_id":project,"parent_id":parent,"title":node.title,"goal":node.goal,"completion_criteria":node.completion_criteria,"priority":node.priority,"status":optional(&r.params,"status")?,"agent_id":optional(&r.params,"agent_id")?}),
     };
     let result = super::mutate(c, &request, Path::new("."))?;
     let task_id = result["task_id"]
@@ -647,7 +648,7 @@ pub(super) fn mutate(c: &Transaction<'_>, r: &Request) -> Result<Option<Value>, 
                         schema_version: SCHEMA_VERSION,
                         request_id: r.request_id.clone(),
                         method: "task.create".into(),
-                        params: json!({"project_id":required(p,"project_id")?,"parent_id":optional(p,"parent_id")?,"title":optional(p,"title")?.unwrap_or(item.title.clone()),"goal":item.note}),
+                        params: json!({"project_id":required(p,"project_id")?,"parent_id":optional(p,"parent_id")?,"title":optional(p,"title")?.unwrap_or(item.title.clone()),"goal":item.note,"status":optional(p,"status")?}),
                     };
                     let task = super::mutate(c, &request, Path::new("."))?;
                     let task_id = task["task_id"].as_str().unwrap();
@@ -876,7 +877,7 @@ pub(super) fn schedule_preview(c: &Connection, p: &Value) -> Result<Value, ApiEr
     let mut conflicts = vec![];
     let mut invalid_tasks = vec![];
     for task in list_tasks(c, &json!({}))? {
-        if task.status == "done" || excluded.as_deref() == Some(task.id.as_str()) {
+        if is_closed(&task.status) || excluded.as_deref() == Some(task.id.as_str()) {
             continue;
         }
         if let (Some(a), Some(b)) = (&task.scheduled_start, &task.scheduled_end) {

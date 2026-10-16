@@ -48,14 +48,14 @@ final class WorkboardAppUITests: XCTestCase {
         launch()
         let card = element("task.\(task)")
         XCTAssertTrue(card.waitForExistence(timeout: 15), "The CLI task card did not appear in the window")
-        XCTAssertTrue(card.label.contains("To do"))
+        XCTAssertTrue(card.label.contains("Todo"))
 
         try cli(["task", "start", task, "--agent", "agent-ui"])
-        waitFor(card, label: "In progress")
+        waitFor(card, label: "In Progress")
         XCTAssertTrue(card.label.contains("agent-ui"), "The assignee did not appear on the card: \(card.label)")
 
         try cli(["task", "review", task, "--agent", "agent-ui", "--summary", "Request review"])
-        waitFor(card, label: "Review")
+        waitFor(card, label: "In Review")
     }
 
     // MARK: - Native drag: move cards between columns and record the outcome
@@ -69,7 +69,7 @@ final class WorkboardAppUITests: XCTestCase {
 
         drag(card, to: "column.review")
         try waitForStatus(task, "review")
-        waitFor(card, label: "Review")
+        waitFor(card, label: "In Review")
 
         drag(card, to: "column.done")
         let sheet = app.sheets.firstMatch
@@ -126,12 +126,14 @@ final class WorkboardAppUITests: XCTestCase {
         try waitUntil("Assign subtask") { try self.task(child)["assignee"] as? String == "codex-ui" }
 
         // Start the subtask from the details status menu. Its assignee becomes the run actor.
-        app.menuButtons["To do"].firstMatch.click()
-        app.menuItems["In progress"].click()
+        app.menuButtons["Todo"].firstMatch.click()
+        app.menuItems["In Progress"].click()
         try waitForStatus(child, "in_progress")
+        // Starting drops the Readiness row, which moves the sections below; act after the details reload.
+        XCTAssertTrue(app.menuButtons["In Progress"].waitForExistence(timeout: 10), "The details did not show the started subtask")
 
         // Attach a URL to the subtask through the artifact attachment window.
-        app.buttons["Add artifacts and links"].click()
+        app.buttons["Add Artifacts and links"].click()
         sheet = app.sheets.firstMatch
         XCTAssertTrue(sheet.waitForExistence(timeout: 5), "The artifact attachment window did not open")
         sheet.textFields.firstMatch.click()
@@ -147,6 +149,90 @@ final class WorkboardAppUITests: XCTestCase {
         parentLink.click()
         XCTAssertTrue(app.staticTexts["1/1"].waitForExistence(timeout: 10), "The subtask completion count did not change to 1/1")
         XCTAssertEqual(try task(parent)["status"] as? String, "todo")
+    }
+
+    // MARK: - Linear workflow: Backlog column, cancellation, deleting cards, and the trash
+
+    func testBacklogCancelDeleteAndTrash() throws {
+        let project = try createProject("Backlog verification")
+        let parked = try cli(["task", "add", "--project", project, "--title", "Parked from the CLI", "--status", "backlog"])["task_id"] as! String
+        let parent = try cli(["task", "add", "--project", project, "--title", "Parent to delete"])["task_id"] as! String
+        let child = try cli(["task", "add", "--project", project, "--parent", parent, "--title", "Subtask deleted with its parent"])["task_id"] as! String
+        launch()
+        let card = element("task.\(parked)")
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "The Backlog card did not appear")
+        XCTAssertTrue(card.label.contains("Backlog"), card.label)
+
+        // The Backlog column's add button creates the task in Backlog.
+        app.buttons["Add task to Backlog"].click()
+        let sheet = app.sheets.firstMatch
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5), "The new task window did not open")
+        sheet.typeText("Captured into Backlog")
+        sheet.buttons["Create task"].click()
+        let created = try waitForTask(titled: "Captured into Backlog", project: project)
+        XCTAssertEqual(try task(created)["status"] as? String, "backlog")
+
+        card.rightClick()
+        app.menuItems["Canceled"].click()
+        try waitForStatus(parked, "canceled")
+        waitFor(card, label: "Canceled")
+
+        // Deleting asks first; canceling the confirmation keeps the task. The dialog's buttons are
+        // mirrored as Touch Bar elements, so query them inside the window's sheet.
+        let parentCard = element("task.\(parent)")
+        parentCard.rightClick()
+        app.menuItems["Delete…"].click()
+        let confirmation = app.sheets.firstMatch
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5), "The delete confirmation did not open")
+        XCTAssertTrue(confirmation.staticTexts["Delete “Parent to delete”?"].exists, "The confirmation does not name the task")
+        XCTAssertTrue(confirmation.staticTexts.matching(NSPredicate(format: "value CONTAINS %@", "subtask moves to Trash too")).firstMatch.exists, "The confirmation does not mention the subtask")
+        confirmation.buttons["Cancel"].click()
+        XCTAssertTrue(confirmation.waitForNonExistence(timeout: 5))
+        XCTAssertEqual(try task(parent)["title"] as? String, "Parent to delete")
+
+        parentCard.rightClick()
+        app.menuItems["Delete…"].click()
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.buttons["Move to Trash"].click()
+        try waitUntil("Move the parent and its subtask to the trash") {
+            (try? self.cli(["task", "show", parent])) == nil && (try? self.cli(["task", "show", child])) == nil
+        }
+        XCTAssertTrue(parentCard.waitForNonExistence(timeout: 10), "The deleted card is still visible")
+        XCTAssertEqual(try trashRoots(), [parent])
+
+        // Restore from the Trash screen brings back the parent and its subtask.
+        element("sidebar.@workboard-trash").click()
+        XCTAssertTrue(element("trash.\(parent)").waitForExistence(timeout: 10), "The deleted task is not in the Trash screen")
+        app.buttons["trash-restore-\(parent)"].click()
+        try waitUntil("Restore from the trash") {
+            let roots = try self.trashRoots()
+            return (try? self.cli(["task", "show", child])) != nil && roots.isEmpty
+        }
+
+        // Delete permanently from the Trash screen after confirming.
+        try cli(["task", "delete", parent, "--with-subtasks"])
+        XCTAssertTrue(element("trash.\(parent)").waitForExistence(timeout: 10))
+        app.buttons["trash-delete-\(parent)"].click()
+        let purge = app.sheets.firstMatch
+        XCTAssertTrue(purge.waitForExistence(timeout: 5), "The permanent deletion confirmation did not open")
+        purge.buttons["Delete Permanently"].click()
+        try waitUntil("Delete permanently") { try self.trashRoots().isEmpty }
+        XCTAssertEqual((try? cli(["trash", "restore", parent])) == nil, true, "A permanently deleted task could be restored")
+
+        // Empty Trash removes everything left in it.
+        try cli(["task", "delete", created])
+        XCTAssertTrue(element("trash.\(created)").waitForExistence(timeout: 10))
+        app.buttons["trash-empty"].click()
+        let empty = app.sheets.firstMatch
+        XCTAssertTrue(empty.waitForExistence(timeout: 5), "The Empty Trash confirmation did not open")
+        empty.buttons["Empty Trash"].click()
+        try waitUntil("Empty the trash") { try self.trashRoots().isEmpty }
+        XCTAssertEqual(try task(parked)["status"] as? String, "canceled", "Live tasks were changed")
+    }
+
+    private func trashRoots() throws -> [String] {
+        let items = try cli(["trash", "list"])["items"] as? [[String: Any]] ?? []
+        return items.compactMap { ($0["task"] as? [String: Any])?["id"] as? String }
     }
 
     // MARK: - MVP 4: handle CLI requests with the window closed and restore after service/app restart

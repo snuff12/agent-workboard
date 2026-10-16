@@ -125,6 +125,54 @@ fn task_delete_preserves_workflow_history_and_invalidates_affected_editors() {
         json!({"task_id":t,"title":"stale","expected_revision":previous_revision}),
         "REVISION_CONFLICT",
     );
+    // The trash keeps every link; restoring the deletion brings them back.
+    assert_eq!(
+        call(&mut b, "inbox.list", json!({}))["items"][0]["task_id"],
+        root
+    );
+    error(
+        &mut b,
+        "inbox.promote",
+        json!({"item_id":item["id"],"project_id":p}),
+        "NOT_FOUND",
+    );
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":child}),
+        "INVALID_STATE",
+    );
+    let trashed_revision = revision(&mut b, &t);
+    let restored = call(&mut b, "trash.restore", json!({"task_id":root}));
+    assert_eq!(restored["restored_task_ids"], json!([root, child]));
+    assert_eq!(get(&mut b, &t)["task"]["dependency_ids"], json!([child]));
+    assert_eq!(get(&mut b, &t)["task"]["ready"], false);
+    assert!(revision(&mut b, &t).as_i64().unwrap() > trashed_revision.as_i64().unwrap());
+    assert_eq!(
+        get(&mut b, &child)["task"]["checklist"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        get(&mut b, &root)["review_decisions"][0]["summary"],
+        "Changes required"
+    );
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":root}),
+        "INVALID_STATE",
+    );
+    call(
+        &mut b,
+        "task.delete",
+        json!({"task_id":root,"with_subtasks":true}),
+    );
+    let before_purge = revision(&mut b, &t);
+    call(&mut b, "trash.purge", json!({"task_id":root}));
+    assert!(revision(&mut b, &t).as_i64().unwrap() > before_purge.as_i64().unwrap());
     let archived = call(&mut b, "inbox.list", json!({}))["items"][0].clone();
     assert_eq!(archived["status"], "processed");
     assert_eq!(archived["task_id"], Value::Null);
@@ -144,7 +192,7 @@ fn task_delete_preserves_workflow_history_and_invalidates_affected_editors() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|e| e["kind"] == "task.deleted")
+        .find(|e| e["kind"] == "task.purged")
         .unwrap()["data"]["removed"];
     assert_eq!(
         removed["workflow"]["dependencies"]
@@ -894,7 +942,7 @@ fn version_four_migration_preserves_tasks_and_seeds_templates_once() {
         b.conn
             .query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))
             .unwrap(),
-        5
+        DATABASE_VERSION
     );
 }
 
@@ -1130,4 +1178,486 @@ fn legacy_skipped_civil_day_survives_v4_migration_and_restore_without_blocking_v
         original_backup,
         "old backup migration changed its source"
     );
+}
+
+/// Rebuilds the tasks table with the version 5 status constraint, as an older service left it.
+fn downgrade_to_v5(path: &Path) {
+    let raw = Connection::open(path).unwrap();
+    raw.execute_batch(r#"
+PRAGMA foreign_keys=OFF;
+BEGIN;
+CREATE TABLE tasks_v5 (
+ id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), parent_id TEXT REFERENCES tasks(id),
+ title TEXT NOT NULL, goal TEXT NOT NULL DEFAULT '', completion_criteria TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','review','done')),
+ priority INTEGER NOT NULL DEFAULT 0, assignee TEXT, next_action TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, blocked_reason TEXT NOT NULL DEFAULT '', completion_summary TEXT NOT NULL DEFAULT '', claimed_at TEXT,
+ due_at TEXT, scheduled_start TEXT, scheduled_end TEXT, time_zone TEXT NOT NULL DEFAULT 'UTC',
+ CHECK(parent_id IS NULL OR parent_id <> id)
+);
+INSERT INTO tasks_v5(rowid,id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone)
+ SELECT rowid,id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone FROM tasks;
+DROP TABLE tasks;
+ALTER TABLE tasks_v5 RENAME TO tasks;
+CREATE INDEX tasks_project ON tasks(project_id);
+CREATE INDEX tasks_parent ON tasks(parent_id);
+CREATE TRIGGER task_search_insert AFTER INSERT ON tasks BEGIN
+ INSERT INTO task_fts(rowid,title,goal,completion_criteria,next_action) VALUES (new.rowid,new.title,new.goal,new.completion_criteria,new.next_action);
+END;
+CREATE TRIGGER task_search_delete AFTER DELETE ON tasks BEGIN
+ INSERT INTO task_fts(task_fts,rowid,title,goal,completion_criteria,next_action) VALUES('delete',old.rowid,old.title,old.goal,old.completion_criteria,old.next_action);
+END;
+CREATE TRIGGER task_search_update AFTER UPDATE ON tasks BEGIN
+ INSERT INTO task_fts(task_fts,rowid,title,goal,completion_criteria,next_action) VALUES('delete',old.rowid,old.title,old.goal,old.completion_criteria,old.next_action);
+ INSERT INTO task_fts(rowid,title,goal,completion_criteria,next_action) VALUES (new.rowid,new.title,new.goal,new.completion_criteria,new.next_action);
+END;
+PRAGMA user_version=5;
+COMMIT;
+"#).unwrap();
+    let rejected = raw.execute("UPDATE tasks SET status='backlog'", []);
+    assert!(rejected.is_err(), "the version 5 table rejects backlog");
+}
+
+#[test]
+fn version_five_migration_keeps_tasks_links_and_search_and_accepts_new_statuses() {
+    let (dir, mut b, p, t) = setup();
+    let child = call(
+        &mut b,
+        "task.create",
+        json!({"project_id":p,"parent_id":t,"title":"Searchable child"}),
+    )["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let rev = revision(&mut b, &child);
+    call(
+        &mut b,
+        "task.dependency.add",
+        json!({"task_id":child,"depends_on_id":t,"expected_revision":rev}),
+    );
+    let run = call(&mut b, "task.start", json!({"task_id":t,"agent_id":"a"}))["run_id"].clone();
+    call(
+        &mut b,
+        "task.attach",
+        json!({"task_id":t,"agent_id":"a","run_id":run,"path":"/tmp/result.txt"}),
+    );
+    checklist(&mut b, &t);
+    let before = get(&mut b, &t);
+    drop(b);
+    let path = dir.path().join("workboard.sqlite3");
+    downgrade_to_v5(&path);
+    let mut b = Board::open(dir.path()).unwrap();
+    let after = get(&mut b, &t);
+    for key in ["task", "children", "artifacts", "runs"] {
+        assert_eq!(after[key], before[key], "{key}");
+    }
+    assert_eq!(get(&mut b, &child)["task"]["dependency_ids"], json!([t]));
+    let found = call(&mut b, "task.list", json!({"query":"Searchable"}))["tasks"].clone();
+    assert_eq!(found.as_array().unwrap().len(), 1, "search index survives");
+    let violations: i64 = b
+        .conn
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(violations, 0);
+    let enforced: bool = b
+        .conn
+        .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+        .unwrap();
+    assert!(
+        enforced,
+        "foreign keys are enforced again after the upgrade"
+    );
+    assert_eq!(
+        call(&mut b, "doctor", json!({}))["database_version"],
+        DATABASE_VERSION
+    );
+    update(&mut b, &child, json!({"status":"backlog"}));
+    update(&mut b, &child, json!({"status":"canceled"}));
+    assert_eq!(get(&mut b, &child)["task"]["status"], "canceled");
+    let renamed = update(&mut b, &child, json!({"title":"Renamed after upgrade"}));
+    assert_eq!(renamed["task"]["title"], "Renamed after upgrade");
+    assert_eq!(
+        call(&mut b, "task.list", json!({"query":"Renamed"}))["tasks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    call(&mut b, "task.delete", json!({"task_id":child}));
+    assert_eq!(get(&mut b, &t)["child_count"], 0);
+    call(&mut b, "trash.restore", json!({"task_id":child}));
+    assert_eq!(
+        get(&mut b, &t)["child_count"],
+        1,
+        "upgraded boards use the trash"
+    );
+}
+
+#[test]
+fn version_five_backup_restores_through_a_private_upgrade() {
+    let (dir, mut b, p, t) = setup();
+    let path = dir.path().join("v5-backup.sqlite3");
+    call(&mut b, "backup.create", json!({"path":path}));
+    downgrade_to_v5(&path);
+    let saved = fs::read(&path).unwrap();
+    task(&mut b, &p, "Removed by restore");
+    call(&mut b, "backup.restore", json!({"path":path}));
+    assert_eq!(fs::read(&path).unwrap(), saved, "the backup is unchanged");
+    let tasks = call(&mut b, "task.list", json!({}))["tasks"].clone();
+    assert_eq!(tasks.as_array().unwrap().len(), 1);
+    update(&mut b, &t, json!({"status":"backlog"}));
+}
+
+#[test]
+fn backlog_tasks_wait_outside_the_ready_queue_until_moved_to_todo() {
+    let (_dir, mut b, p, _) = setup();
+    let parked = call(
+        &mut b,
+        "task.create",
+        json!({"project_id":p,"title":"Someday","status":"backlog"}),
+    )["task"]
+        .clone();
+    assert_eq!(parked["status"], "backlog");
+    assert_eq!(parked["ready"], false);
+    let id = parked["id"].as_str().unwrap().to_string();
+    for invalid in ["in_progress", "review", "done", "canceled", "later"] {
+        error(
+            &mut b,
+            "task.create",
+            json!({"project_id":p,"title":"Wrong start","status":invalid}),
+            "INVALID_PARAMS",
+        );
+    }
+    let backlog = call(&mut b, "task.list", json!({"status":"backlog"}))["tasks"].clone();
+    assert_eq!(backlog.as_array().unwrap().len(), 1);
+    let ready = call(&mut b, "task.list", json!({"ready_only":true}))["tasks"].clone();
+    assert!(ready
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["id"] != id.as_str()));
+    let moved = update(&mut b, &id, json!({"status":"todo"}));
+    assert_eq!(moved["task"]["ready"], true);
+    update(&mut b, &id, json!({"status":"backlog"}));
+    let started = call(&mut b, "task.start", json!({"task_id":id,"agent_id":"a"}));
+    assert_eq!(
+        started["task"]["status"], "in_progress",
+        "backlog work can start"
+    );
+    let item = call(&mut b, "inbox.capture", json!({"title":"Idea"}))["item"].clone();
+    let promoted = call(
+        &mut b,
+        "inbox.promote",
+        json!({"item_id":item["id"],"expected_revision":item["revision"],"project_id":p,"status":"backlog"}),
+    );
+    assert_eq!(promoted["task"]["status"], "backlog");
+    let tree = call(
+        &mut b,
+        "template.apply",
+        json!({"template_id":"builtin-bugfix","project_id":p,"status":"backlog"}),
+    );
+    let created = tree["tasks"].as_array().unwrap();
+    assert_eq!(created.len(), 4);
+    assert!(created.iter().all(|t| t["status"] == "backlog"));
+}
+
+#[test]
+fn canceled_tasks_stop_runs_refuse_work_and_release_dependents() {
+    let (_dir, mut b, p, t) = setup();
+    let dependent = task(&mut b, &p, "Dependent");
+    let rev = revision(&mut b, &dependent);
+    call(
+        &mut b,
+        "task.dependency.add",
+        json!({"task_id":dependent,"depends_on_id":t,"expected_revision":rev}),
+    );
+    assert_eq!(get(&mut b, &dependent)["task"]["ready"], false);
+    update(
+        &mut b,
+        &t,
+        json!({"scheduled_start":"2026-11-02T09:00:00Z","scheduled_end":"2026-11-02T10:00:00Z"}),
+    );
+    call(&mut b, "task.start", json!({"task_id":t,"agent_id":"a"}));
+    let canceled = update(&mut b, &t, json!({"status":"canceled"}));
+    assert_eq!(canceled["task"]["status"], "canceled");
+    assert_eq!(canceled["runs"][0]["status"], "interrupted");
+    assert_eq!(
+        canceled["task"]["assignee"], "a",
+        "cancellation keeps the assignee"
+    );
+    for (method, extra) in [
+        ("task.claim", json!({"agent_id":"a"})),
+        ("task.start", json!({"agent_id":"a"})),
+    ] {
+        let mut params = extra;
+        params["task_id"] = json!(t);
+        error(&mut b, method, params, "INVALID_STATE");
+    }
+    let unblocked = get(&mut b, &dependent)["task"].clone();
+    assert_eq!(unblocked["blocked_by"], json!([]));
+    assert_eq!(unblocked["ready"], true);
+    call(
+        &mut b,
+        "task.start",
+        json!({"task_id":dependent,"agent_id":"b"}),
+    );
+    let preview = call(
+        &mut b,
+        "task.schedule.preview",
+        json!({"scheduled_start":"2026-11-02T09:30:00Z","scheduled_end":"2026-11-02T09:45:00Z","time_zone":"UTC"}),
+    );
+    assert_eq!(
+        preview["has_conflicts"], false,
+        "canceled work frees its slot"
+    );
+    let child = call(
+        &mut b,
+        "task.create",
+        json!({"project_id":p,"parent_id":dependent,"title":"Dropped step"}),
+    )["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    task(&mut b, &p, "Unrelated");
+    update(&mut b, &child, json!({"status":"canceled"}));
+    let parent = get(&mut b, &dependent);
+    assert_eq!(parent["child_count"], 1);
+    assert_eq!(parent["completed_child_count"], 0);
+    assert_eq!(parent["canceled_child_count"], 1);
+    let reopened = update(&mut b, &t, json!({"status":"todo"}));
+    assert_eq!(reopened["task"]["status"], "todo");
+    error(
+        &mut b,
+        "task.update",
+        json!({"task_id":t,"expected_revision":reopened["revision"],"status":"closed"}),
+        "INVALID_PARAMS",
+    );
+}
+
+fn child(b: &mut Board, p: &str, parent: &str, title: &str) -> String {
+    call(
+        b,
+        "task.create",
+        json!({"project_id":p,"parent_id":parent,"title":title}),
+    )["task_id"]
+        .as_str()
+        .unwrap()
+        .into()
+}
+
+#[test]
+fn trash_restores_whole_deletions_and_needs_a_live_parent() {
+    let (_dir, mut b, p, root) = setup();
+    let kept = child(&mut b, &p, &root, "Deleted with the parent");
+    let alone = child(&mut b, &p, &root, "Deleted on its own");
+    update(
+        &mut b,
+        &alone,
+        json!({"scheduled_start":"2026-11-03T09:00:00Z","scheduled_end":"2026-11-03T10:00:00Z"}),
+    );
+    call(&mut b, "task.delete", json!({"task_id":alone}));
+    let preview = call(
+        &mut b,
+        "task.schedule.preview",
+        json!({"scheduled_start":"2026-11-03T09:00:00Z","scheduled_end":"2026-11-03T09:30:00Z","time_zone":"UTC"}),
+    );
+    assert_eq!(
+        preview["has_conflicts"], false,
+        "trashed work frees its slot"
+    );
+    call(
+        &mut b,
+        "task.delete",
+        json!({"task_id":root,"with_subtasks":true}),
+    );
+    assert!(call(&mut b, "task.list", json!({}))["tasks"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let items = call(&mut b, "trash.list", json!({}))["items"].clone();
+    let items = items.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    let parent_item = items.iter().find(|i| i["task"]["id"] == root).unwrap();
+    assert_eq!(parent_item["subtask_count"], 1);
+    assert_eq!(parent_item["tasks"][1]["id"], kept);
+    let orphan = items.iter().find(|i| i["task"]["id"] == alone).unwrap();
+    assert_eq!(orphan["restorable"], false);
+    assert_eq!(orphan["parent_in_trash"]["title"], "Task");
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":alone}),
+        "INVALID_STATE",
+    );
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":kept}),
+        "INVALID_STATE",
+    );
+    error(
+        &mut b,
+        "trash.purge",
+        json!({"task_id":kept}),
+        "INVALID_STATE",
+    );
+    for (method, params) in [
+        (
+            "task.update",
+            json!({"task_id":root,"expected_revision":1,"title":"x"}),
+        ),
+        ("task.delete", json!({"task_id":root})),
+        (
+            "task.create",
+            json!({"project_id":p,"parent_id":root,"title":"Under trash"}),
+        ),
+        ("task.start", json!({"task_id":kept})),
+    ] {
+        error(&mut b, method, params, "NOT_FOUND");
+    }
+    let other = task(&mut b, &p, "Live task");
+    let rev = revision(&mut b, &other);
+    error(
+        &mut b,
+        "task.update",
+        json!({"task_id":other,"expected_revision":rev,"parent_id":root}),
+        "NOT_FOUND",
+    );
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":root,"expected_revision":1}),
+        "REVISION_CONFLICT",
+    );
+    let restore = req("trash.restore", json!({"task_id":root}));
+    let restored = b.dispatch(restore.clone());
+    assert!(restored.ok, "{restored:?}");
+    assert_eq!(b.dispatch(restore).result, restored.result, "retry");
+    let restored = restored.result.unwrap();
+    assert_eq!(restored["restored_task_ids"], json!([root, kept]));
+    assert_eq!(restored["trash_count"], 1);
+    assert_eq!(get(&mut b, &root)["child_count"], 1);
+    let orphan = call(&mut b, "trash.list", json!({}))["items"][0].clone();
+    assert_eq!(orphan["restorable"], true);
+    call(&mut b, "trash.restore", json!({"task_id":alone}));
+    assert_eq!(get(&mut b, &root)["child_count"], 2);
+    assert_eq!(
+        call(
+            &mut b,
+            "task.schedule.preview",
+            json!({"scheduled_start":"2026-11-03T09:00:00Z","scheduled_end":"2026-11-03T09:30:00Z","time_zone":"UTC"}),
+        )["has_conflicts"],
+        true
+    );
+    let events = call(&mut b, "events.list", json!({}))["events"].clone();
+    assert!(events
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["kind"] == "task.restored" && e["task_id"] == root));
+}
+
+#[test]
+fn purging_takes_earlier_trashed_subtasks_and_emptying_clears_the_trash() {
+    let (_dir, mut b, p, root) = setup();
+    let earlier = child(&mut b, &p, &root, "Trashed first");
+    call(&mut b, "task.delete", json!({"task_id":earlier}));
+    call(&mut b, "task.delete", json!({"task_id":root}));
+    error(
+        &mut b,
+        "trash.purge",
+        json!({"task_id":"missing"}),
+        "NOT_FOUND",
+    );
+    let live = task(&mut b, &p, "Still on the board");
+    error(
+        &mut b,
+        "trash.purge",
+        json!({"task_id":live}),
+        "INVALID_STATE",
+    );
+    error(
+        &mut b,
+        "trash.restore",
+        json!({"task_id":live}),
+        "INVALID_STATE",
+    );
+    let purged = call(&mut b, "trash.purge", json!({"task_id":root}));
+    assert_eq!(purged["deleted_task_ids"], json!([root, earlier]));
+    assert_eq!(purged["trash_count"], 0);
+    for title in ["One", "Two"] {
+        let id = task(&mut b, &p, title);
+        call(&mut b, "task.delete", json!({"task_id":id}));
+    }
+    let empty = req("trash.empty", json!({}));
+    let emptied = b.dispatch(empty.clone());
+    assert!(emptied.ok, "{emptied:?}");
+    assert_eq!(b.dispatch(empty).result, emptied.result, "retry");
+    assert_eq!(
+        emptied.result.unwrap()["deleted_task_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        call(&mut b, "trash.empty", json!({}))["deleted_task_ids"],
+        json!([])
+    );
+    let tasks = call(&mut b, "task.list", json!({}))["tasks"].clone();
+    assert_eq!(
+        tasks.as_array().unwrap().len(),
+        1,
+        "live tasks are untouched"
+    );
+    let violations: i64 = b
+        .conn
+        .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(violations, 0);
+}
+
+#[test]
+fn trash_survives_backup_restore_and_export_and_project_deletion_empties_it() {
+    let (dir, mut b, p, t) = setup();
+    call(&mut b, "task.delete", json!({"task_id":t}));
+    let backup = dir.path().join("with-trash.sqlite3");
+    call(&mut b, "backup.create", json!({"path":backup}));
+    call(&mut b, "trash.empty", json!({}));
+    call(&mut b, "backup.restore", json!({"path":backup}));
+    let items = call(&mut b, "trash.list", json!({}))["items"].clone();
+    assert_eq!(
+        items[0]["task"]["id"], t,
+        "the restored board keeps its trash"
+    );
+    let exported = call(&mut b, "export", json!({}));
+    assert_eq!(exported["data"]["trash"][0]["task"]["id"], t);
+    assert!(exported["data"]["tasks"].as_array().unwrap().is_empty());
+    let markdown = call(&mut b, "export", json!({"format":"markdown"}))["content"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(markdown.contains("## Trash") && markdown.contains("- Task (ID"));
+    let refused = b.dispatch(req("project.delete", json!({"project_id":p})));
+    let refused = refused.error.unwrap();
+    assert_eq!(refused.code, "HAS_TASKS");
+    assert!(
+        refused.message.contains("1 in the trash"),
+        "{}",
+        refused.message
+    );
+    let deleted = call(
+        &mut b,
+        "project.delete",
+        json!({"project_id":p,"with_tasks":true}),
+    );
+    assert_eq!(deleted["deleted_task_ids"], json!([t]));
+    assert!(call(&mut b, "trash.list", json!({}))["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 }

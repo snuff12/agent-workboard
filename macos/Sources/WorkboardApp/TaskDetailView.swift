@@ -21,6 +21,8 @@ struct TaskDetailView: View {
                         Button("Save as template…") { showingTemplate = true }
                         Button("Copy resume context") { Task { await store.resumeContext(task) } }
                         Button("Copy task ID") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(task.id, forType: .string); store.notice = "Task ID copied." }
+                        Divider()
+                        Button("Delete…", role: .destructive) { store.requestDelete(task) }.disabled(store.isMutating)
                     } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22).help("Task menu")
                 }
                 Button { store.selectedTaskID = nil; store.detail = nil } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .medium)) }.buttonStyle(.plain).foregroundStyle(BoardInk.secondary(colorScheme)).help("Close details")
@@ -97,7 +99,7 @@ struct TaskDetailView: View {
                 GridRow { Label("Schedule time zone", systemImage: "globe").foregroundStyle(BoardInk.secondary(colorScheme)); Text(task.timeZone).foregroundStyle(BoardInk.secondary(colorScheme)) }
                 if task.timeZone != TimeZone.current.identifier { GridRow { Text("Displayed time").foregroundStyle(BoardInk.secondary(colorScheme)); Text("Device time zone").foregroundStyle(BoardInk.secondary(colorScheme)) } }
             }
-            if task.claimStale { GridRow { Label("Check assignee", systemImage: "exclamationmark.clock").foregroundStyle(.orange); Text("Check activity status").foregroundStyle(.orange) } }
+            if task.claimStale && !task.status.isClosed { GridRow { Label("Check assignee", systemImage: "exclamationmark.clock").foregroundStyle(.orange); Text("Check activity status").foregroundStyle(.orange) } }
         }.font(.system(size: 11 * appearance.theme.fontScale)).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 3)
     }
     private func detailText(_ value: String, empty: String) -> some View {
@@ -105,8 +107,9 @@ struct TaskDetailView: View {
     }
     private func children(_ detail: TaskDetail) -> some View {
         let rows = store.children(of: detail.task)
-        let done = rows.filter { $0.status == .done }.count
-        return DetailSection(title: "Subtask", symbol: "checklist", count: rows.isEmpty ? nil : "\(done)/\(rows.count)", action: { store.newTask(parent: detail.task) }) {
+        let counted = rows.filter { $0.status != .canceled }
+        let done = counted.filter { $0.status == .done }.count
+        return DetailSection(title: "Subtask", symbol: "checklist", count: counted.isEmpty ? nil : "\(done)/\(counted.count)", action: { store.newTask(parent: detail.task) }) {
             if rows.isEmpty { Text("Break a large task into small, actionable steps.").font(.caption).foregroundStyle(BoardInk.tertiary(colorScheme)) }
             else {
                 VStack(spacing: 0) {
@@ -205,7 +208,7 @@ struct TaskDetailView: View {
     }
     private func statusInk(_ status: WorkStatus) -> Color {
         switch status {
-        case .todo: BoardInk.secondary(colorScheme)
+        case .backlog, .todo, .canceled: BoardInk.secondary(colorScheme)
         case .inProgress: Color(hex: colorScheme == .dark ? "76ACFF" : "316AC4")
         case .review: Color(hex: colorScheme == .dark ? "FFB454" : "AE6200")
         case .done: Color(hex: colorScheme == .dark ? "66D695" : "25834C")

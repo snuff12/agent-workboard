@@ -28,6 +28,14 @@ import SwiftUI
             try capture(root, size: NSSize(width: 1600, height: 1000), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("board-\(mode.rawValue).png"))
         }
         store.selectedTaskID = nil; store.detail = nil
+        let boardScope = store.selectedProjectID
+        store.selectedProjectID = BoardStore.trashScope
+        for mode in [AppearanceMode.light, .dark] {
+            appearance.theme.appearance = mode
+            let root = BoardView().environmentObject(appearance).environmentObject(store).tint(appearance.accent).preferredColorScheme(mode.colorScheme).environment(\.colorScheme, mode == .dark ? .dark : .light)
+            try capture(root, size: NSSize(width: 1400, height: 760), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("trash-\(mode.rawValue).png"))
+        }
+        store.selectedProjectID = boardScope
         for mode in [AppearanceMode.light, .dark] {
             appearance.theme.appearance = mode
             let scheme: ColorScheme = mode == .dark ? .dark : .light
