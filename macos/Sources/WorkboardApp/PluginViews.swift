@@ -59,12 +59,12 @@ struct PluginSettingsView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     if plugins.entries.isEmpty {
-                        VStack(spacing: 12) { Image(systemName: "puzzlepiece.extension").font(.system(size: 32, weight: .ultraLight)).foregroundStyle(.tertiary); Text("No plugins installed").font(.callout.weight(.medium)); Text("Choose an agent-memory, Google Workspace, Slack, or Orca package directory to install it. Core task management works without plugins.").font(.caption).foregroundStyle(Color.secondary).multilineTextAlignment(.center) }.padding(35).frame(maxWidth: .infinity)
+                        VStack(spacing: 12) { Image(systemName: "puzzlepiece.extension").font(.system(size: 32, weight: .ultraLight)).foregroundStyle(.tertiary); Text("No plugins installed").font(.callout.weight(.medium)); Text("Choose an agent-memory, Google Workspace, Slack, Linear, or Orca package directory to install it. Core task management works without plugins.").font(.caption).foregroundStyle(Color.secondary).multilineTextAlignment(.center) }.padding(35).frame(maxWidth: .infinity)
                     }
                     ForEach(plugins.entries) { plugin in
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(spacing: 10) {
-                                Image(systemName: plugin.id == "google-workspace" ? "calendar" : plugin.id == "slack" ? "bubble.left.and.bubble.right" : plugin.id == "gmail" ? "envelope" : plugin.id == "agent-memory" ? "books.vertical" : plugin.id == "orca" ? "terminal" : "puzzlepiece.extension").font(.system(size: 20)).foregroundStyle(appearance.accent).frame(width: 30)
+                                Image(systemName: plugin.id == "google-workspace" ? "calendar" : plugin.id == "slack" ? "bubble.left.and.bubble.right" : plugin.id == "linear" ? "checklist" : plugin.id == "gmail" ? "envelope" : plugin.id == "agent-memory" ? "books.vertical" : plugin.id == "orca" ? "terminal" : "puzzlepiece.extension").font(.system(size: 20)).foregroundStyle(appearance.accent).frame(width: 30)
                                 VStack(alignment: .leading, spacing: 3) { HStack { Text(plugin.name).font(.callout.weight(.semibold)); Text(plugin.version).font(.caption2).foregroundStyle(.tertiary) }; Text(plugin.enabled ? "Enabled" : "Disabled").font(.caption2).foregroundStyle(plugin.enabled ? .green : .secondary) }
                                 Spacer()
                                 if plugin.enabled { Button("Use…") { using = plugin }.disabled(plugins.busy) }
@@ -111,6 +111,10 @@ struct PluginConfigurationDraft {
     var slackMessagesEnabled: Bool
     var slackSendEnabled: Bool
     var slackTeamID: String
+    var linearWorkspace: String
+    var linearIssuesEnabled: Bool
+    var linearCommentsEnabled: Bool
+    var linearStateChangesEnabled: Bool
     var advancedJSON: String
 
     init(config: JSONValue, defaultsForNewInstall: Bool = false) {
@@ -127,6 +131,10 @@ struct PluginConfigurationDraft {
         slackMessagesEnabled = config["messages_enabled"].bool ?? false
         slackSendEnabled = config["send_enabled"].bool ?? false
         slackTeamID = config["team_id"].string ?? ""
+        linearWorkspace = config["workspace"].string ?? ""
+        linearIssuesEnabled = config["issues_enabled"].bool ?? false
+        linearCommentsEnabled = config["comments_enabled"].bool ?? false
+        linearStateChangesEnabled = config["state_changes_enabled"].bool ?? false
         advancedJSON = config.pretty
     }
     /// One Orca repository selector per line, such as `path:/folder`, `id:…`, or `name:…`.
@@ -164,6 +172,13 @@ struct PluginConfigurationDraft {
             config["team_id"] = .string(slackTeamID.trimmingCharacters(in: .whitespacesAndNewlines))
             config["messages_enabled"] = .bool(slackMessagesEnabled)
             config["send_enabled"] = .bool(slackSendEnabled)
+        } else if pluginID == "linear" {
+            config["account"] = .string(account.isEmpty ? "default" : account)
+            config["credentials_file"] = .string(credentialsFile)
+            config["workspace"] = .string(linearWorkspace.trimmingCharacters(in: .whitespacesAndNewlines))
+            config["issues_enabled"] = .bool(linearIssuesEnabled)
+            config["comments_enabled"] = .bool(linearCommentsEnabled)
+            config["state_changes_enabled"] = .bool(linearStateChangesEnabled)
         } else {
             let edited = try JSONDecoder().decode(JSONValue.self, from: Data(advancedJSON.utf8))
             guard case .object(let fields) = edited else { throw WorkboardError(message: "Configuration must be a JSON object.") }
@@ -210,13 +225,21 @@ private struct PluginConfigurationView: View {
                     Toggle("Enable Slack message reading", isOn: $draft.slackMessagesEnabled)
                     Toggle("Send selected task status to Slack (optional)", isOn: $draft.slackSendEnabled)
                     Text("Use a User Token with search:read and conversation read permissions. Sending also requires chat:write. Save, then choose ‘Use’ to connect the token. Tokens are stored in macOS Keychain.").font(.caption).foregroundStyle(Color.secondary)
+                } else if plugin.id == "linear" {
+                    HStack { TextField("Linear API key JSON file", text: $draft.credentialsFile); Button("Choose…") { chooseFile { draft.credentialsFile = $0 } } }
+                    TextField("Account label", text: $draft.account)
+                    TextField("Workspace URL key (linear.app/<key>)", text: $draft.linearWorkspace)
+                    Toggle("Enable Linear issue reading", isOn: $draft.linearIssuesEnabled)
+                    Toggle("Post selected task status as Linear comments (optional)", isOn: $draft.linearCommentsEnabled)
+                    Toggle("Change Linear issue state from the board (optional)", isOn: $draft.linearStateChangesEnabled)
+                    Text("Use a Linear personal API key. Save, then choose ‘Use’ to connect the key. Keys are stored in macOS Keychain.").font(.caption).foregroundStyle(Color.secondary)
                 } else { Section { TextEditor(text: $draft.advancedJSON).font(.system(.caption, design: .monospaced)).frame(height: 100) } header: { Text("Configuration JSON") } }
                 if !loaded && plugins.error == nil { ProgressView("Reading current configuration…").controlSize(.small) }
                 if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             }.formStyle(.grouped).disabled(!loaded || plugins.busy)
             Divider()
             HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if plugins.busy { ProgressView().controlSize(.small) }; Button("Save and enable") { enable() }.buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent)).keyboardShortcut(.defaultAction).disabled(!loaded || plugins.busy) }.padding(20)
-        }.frame(width: 560, height: plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : plugin.id == "orca" ? 440 : 365).task {
+        }.frame(width: 560, height: plugin.id == "linear" ? 530 : plugin.id == "slack" ? 500 : plugin.id == "google-workspace" ? 450 : plugin.id == "orca" ? 440 : 365).task {
             plugins.error = nil
             guard let response = await plugins.call("plugin.config", params: ["id": .string(plugin.id)], configuration: appearance.connection) else { return }
             guard case .object = response["config"] else { plugins.error = "Could not read the current plugin configuration."; return }
@@ -432,7 +455,7 @@ struct PluginBrowserView: View {
     @State private var showingCapture = false
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack { VStack(alignment: .leading, spacing: 5) { Text(plugin.name).font(.title2.weight(.semibold)); Text(plugin.id == "orca" ? "Browse worktrees and runs, and link them to board tasks." : plugin.id == "gmail" ? "Find mail and attach it to a task or import it as a new task." : plugin.id == "slack" ? "Read source messages and attach or import them as tasks." : "Read search results, verify the source, and attach evidence.").font(.caption).foregroundStyle(Color.secondary) }; Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(22)
+            HStack { VStack(alignment: .leading, spacing: 5) { Text(plugin.name).font(.title2.weight(.semibold)); Text(plugin.id == "orca" ? "Browse worktrees and runs, and link them to board tasks." : plugin.id == "gmail" ? "Find mail and attach it to a task or import it as a new task." : plugin.id == "slack" ? "Read source messages and attach or import them as tasks." : plugin.id == "linear" ? "Read issues and attach or import them as tasks." : "Read search results, verify the source, and attach evidence.").font(.caption).foregroundStyle(Color.secondary) }; Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }.padding(22)
             Divider()
             if plugin.id == "google-workspace" {
                 TabView {
@@ -443,6 +466,7 @@ struct PluginBrowserView: View {
             else if plugin.id == "gmail" { gmailContent }
             else if plugin.id == "agent-memory" { memoryContent }
             else if plugin.id == "slack" { SlackMessagesView(plugin: plugin, plugins: plugins, configuration: appearance.connection).id(appearance.connection.identity()) }
+            else if plugin.id == "linear" { LinearIssuesView(plugin: plugin, plugins: plugins, configuration: appearance.connection).id(appearance.connection.identity()) }
             else if plugin.id == "orca" { OrcaBrowserView(plugin: plugin, plugins: plugins).id(appearance.connection.identity()) }
             else { Text("Use this plugin’s features through the CLI.").foregroundStyle(Color.secondary).padding(25); Spacer() }
             if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled).padding(.horizontal, 22).padding(.bottom, 12) }
@@ -545,7 +569,7 @@ struct SlackMessage: Identifiable {
     }
 }
 
-@MainActor final class SlackSession: ObservableObject {
+@MainActor final class PluginSession: ObservableObject {
     let configuration: ConnectionConfiguration
     private var active = true
     private var observation: AnyCancellable?
@@ -588,7 +612,7 @@ private struct SlackMessagesView: View {
     @EnvironmentObject private var board: BoardStore
     let plugin: InstalledPlugin
     @ObservedObject var plugins: PluginStore
-    @StateObject private var session: SlackSession
+    @StateObject private var session: PluginSession
     @State private var query = ""
     @State private var searchedQuery = ""
     @State private var messages: [SlackMessage] = []
@@ -603,7 +627,7 @@ private struct SlackMessagesView: View {
 
     init(plugin: InstalledPlugin, plugins: PluginStore, configuration: ConnectionConfiguration) {
         self.plugin = plugin; self.plugins = plugins
-        _session = StateObject(wrappedValue: SlackSession(configuration: configuration))
+        _session = StateObject(wrappedValue: PluginSession(configuration: configuration))
     }
 
     var body: some View {
