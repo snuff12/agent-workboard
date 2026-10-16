@@ -36,14 +36,24 @@ worktree = {"id": "repo-1::/tmp/worktree", "repoId": "repo-1", "projectId": "pro
             "displayName": "Test worktree", "comment": "Original task goal", "workspaceStatus": "done", "isArchived": False}
 terminal = {"handle": "term-fixture", "title": "Test run", "worktreeId": worktree["id"],
             "agentIdentity": "codex", "connected": True, "writable": True, "preview": "PRIVATE_PREVIEW"}
+second = dict(worktree, id="repo-2::/tmp/second", repoId="repo-2", path="/tmp/second", displayName="Second worktree")
+unconnected = dict(worktree, id="repo-3::/tmp/third", repoId="repo-3", path="/tmp/third")
+repos = [{"id": "repo-1", "displayName": "fixture $(literal)", "path": "/tmp/awb repo one"},
+         {"id": "repo-2", "displayName": "second", "path": "/tmp/awb-repo-two"},
+         {"id": "repo-3", "displayName": "second", "path": "/tmp/awb-repo-three"},
+         {"id": "repo-4", "displayName": "remote", "path": "/srv/remote", "hostId": "remote-host"}]
 if mode == "foreign": worktree["repoId"] = "other-repo"
 if mode == "remote": worktree["hostId"] = "remote-host"
-if args[:2] == ["repo", "show"]:
-    result = {"repo": {"id": "repo-1", "displayName": "fixture"}}
+by_repo = {"id:repo-1": [worktree], "id:repo-2": [second], "id:repo-3": [unconnected]}
+by_id = {item["id"]: item for item in (worktree, second, unconnected)}
+if args[:2] == ["repo", "list"]:
+    result = {"repos": repos}
 elif args[:2] == ["worktree", "list"]:
-    result = {"worktrees": [worktree], "totalCount": 2, "truncated": True}
+    rows = by_repo[args[args.index("--repo") + 1]]
+    result = {"worktrees": rows, "totalCount": 2 if rows is by_repo["id:repo-1"] else 1,
+              "truncated": rows is by_repo["id:repo-1"]}
 elif args[:2] == ["worktree", "show"]:
-    result = {"worktree": worktree}
+    result = {"worktree": by_id[args[args.index("--worktree") + 1][3:]]}
 elif args[:2] == ["terminal", "list"]:
     if mode == "terminal-mismatch": terminal["worktreeId"] = "other"
     result = {"terminals": [terminal], "truncated": False}
@@ -100,9 +110,36 @@ class OrcaProvider(Fixture):
         self.assertTrue(result["ok"], result)
         self.assertTrue(result["result"]["truncated"])
         self.assertEqual(result["result"]["worktrees"][0]["head"], "head-1")
-        self.assertEqual(self.calls()[0], ["repo", "show", "--repo", self.config["repo"], "--json"])
+        self.assertEqual(self.calls()[0], ["repo", "list", "--json"])
         self.assertEqual(self.calls()[1][:4], ["worktree", "list", "--repo", "id:repo-1"])
+        self.assertEqual(len(self.calls()), 2, "the earlier single-repository setting still connects one repository")
         self.assertNotIn("requests", result)
+
+    def test_multiple_repositories_list_together_and_scope_each_worktree(self):
+        config = {"executable": str(self.fake), "repos": ["id:repo-1", "path:/tmp/awb-repo-two/", "name:missing",
+                                                          "name:second", "id:repo-4", "id:repo-1"]}
+        check = self.invoke("check", config=config)["result"]
+        self.assertEqual([repo["id"] for repo in check["repos"]], ["repo-1", "repo-2"])
+        self.assertEqual({entry["selector"]: entry["reason"] for entry in check["unmatched"]}, {
+            "name:missing": "not registered in Orca on this Mac", "name:second": "matches several repositories",
+            "id:repo-4": "not registered in Orca on this Mac"}, "ambiguous names and remote hosts are not connected")
+        listing = self.invoke("worktrees.list", config=config)["result"]
+        self.assertEqual([(row["id"], row["repo_name"], row["repo_path"]) for row in listing["worktrees"]], [
+            (self.worktree_id, "fixture $(literal)", "/tmp/awb repo one"),
+            ("repo-2::/tmp/second", "second", "/tmp/awb-repo-two")])
+        self.assertEqual((listing["truncated"], listing["total_count"]), (True, 3))
+        only = self.invoke("worktrees.list", {"repo_id": "repo-2"}, config=config)["result"]
+        self.assertEqual([row["id"] for row in only["worktrees"]], ["repo-2::/tmp/second"])
+        self.assertEqual(self.invoke("worktrees.list", {"repo_id": "repo-3"}, config=config)["error"]["code"],
+                         "PLUGIN_SCOPE_MISMATCH")
+        imported = self.invoke("worktrees.import", {"worktree_id": "repo-2::/tmp/second", "project_id": "p"}, config=config)
+        self.assertEqual(imported["requests"][1]["params"]["metadata"]["repo_path"], "/tmp/awb-repo-two")
+        before = len(self.calls())
+        foreign = self.invoke("worktrees.get", {"worktree_id": "repo-3::/tmp/third"}, config=config)
+        self.assertEqual(foreign["error"]["code"], "PLUGIN_SCOPE_MISMATCH")
+        self.assertEqual(self.calls()[before:], [["repo", "list", "--json"]], "an unconnected worktree is never read")
+        missing = self.invoke("check", config={"executable": str(self.fake), "repos": ["name:missing"]})
+        self.assertIn("name:missing", missing["error"]["message"])
 
     def test_foreign_selector_rejected_before_show_and_remote_response_rejected(self):
         response = self.invoke("worktrees.get", {"worktree_id": "other::/tmp/no"})
@@ -124,8 +161,12 @@ class OrcaProvider(Fixture):
         self.assertEqual(attachment["params"]["metadata"]["workspace_status"], "done")
 
     def test_invalid_settings_and_missing_import_target_do_not_invoke_orca(self):
-        for config in ({"executable": "orca", "repo": "name:fixture"}, {"executable": str(self.fake), "repo": "active"}):
-            self.assertFalse(self.invoke("check", config=config)["ok"])
+        for config in ({"executable": "orca", "repo": "name:fixture"}, {"executable": str(self.fake), "repo": "active"},
+                       {"executable": str(self.fake)}, {"executable": str(self.fake), "repos": []},
+                       {"executable": str(self.fake), "repos": "id:repo-1"},
+                       {"executable": str(self.fake), "repos": ["id:repo-1", "path:"]},
+                       {"executable": str(self.fake), "repos": ["id:" + str(n) for n in range(51)]}):
+            self.assertFalse(self.invoke("check", config=config)["ok"], config)
         self.assertFalse(self.invoke("worktrees.import", {"worktree_id": self.worktree_id})["ok"])
         self.assertEqual(self.calls(), [])
 
@@ -219,6 +260,7 @@ class OrcaHost(Fixture):
             self.assertLess(time.monotonic(), deadline)
             time.sleep(0.02)
         self.cli("plugin", "install", str(PLUGIN.parent))
+        self.config = {"executable": str(self.fake), "repos": ["id:repo-1", "path:/tmp/awb-repo-two"]}
 
     def stop(self):
         if self.server.poll() is None:
@@ -253,6 +295,11 @@ class OrcaHost(Fixture):
         self.cli("plugin", "check", "orca", ok=False)
         self.cli("doctor")
         self.assertEqual(self.calls(), [])
+
+    def test_check_reports_connected_repositories_through_the_host(self):
+        self.enable()
+        check = self.cli("plugin", "check", "orca")["result"]["result"]
+        self.assertEqual([repo["name"] for repo in check["repos"]], ["fixture $(literal)", "second"])
 
     def test_import_retry_subtask_attach_and_removal_preserve_board(self):
         self.enable()

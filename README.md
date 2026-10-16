@@ -51,7 +51,7 @@ scripts/install-local.sh --start-service
 
 Data defaults to `~/Library/Application Support/AgentWorkboard`. Use `--data-dir` and `--socket` for isolated development data. See the [CLI contract](docs/cli-contract.md) and [Google Workspace guide](docs/google-workspace.md).
 
-`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app: `dist/AgentWorkboard-plugin-{agent-memory,google-workspace,slack,orca}-0.1.0.zip`. Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.1.0`. Installation leaves the plugin disabled; follow its guide to configure it.
+`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app, named `dist/AgentWorkboard-plugin-<id>-<version>.zip` (for example `AgentWorkboard-plugin-orca-0.2.0.zip`). Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.2.0`. Installation leaves the plugin disabled; follow its guide to configure it.
 
 `scripts/verify-plugin-packages.sh` checks the two files in each ZIP, extracts and installs it through an isolated CLI, and verifies the disabled default. It does not use the user's board or external accounts.
 
