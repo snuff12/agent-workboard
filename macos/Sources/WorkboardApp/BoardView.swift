@@ -36,6 +36,8 @@ struct BoardView: View {
         .sheet(item: $store.draft) { draft in TaskEditorView(draft: draft) }
         .sheet(isPresented: $store.showingNewProject) { NewProjectView() }
         .sheet(item: $store.completionTask) { task in CompleteTaskView(task: task) }
+        .sheet(item: $store.worktreeLinkTask) { task in OrcaWorktreePicker(task: task) }
+        .task(id: appearance.connection.identity()) { await store.refreshPlugins() }
         .sheet(isPresented: $showingFilters) { ViewFilterPanel() }
         .sheet(isPresented: $showingTemplates) { TemplateLibraryView() }
         .alert("Could not process the request", isPresented: Binding(get: { store.actionError != nil }, set: { if !$0 { store.actionError = nil } })) { Button("OK") { store.actionError = nil } } message: { Text(store.actionError ?? "") }
@@ -262,6 +264,7 @@ struct TaskCard: View {
                 Divider()
                 ForEach(WorkStatus.allCases) { status in Button { Task { await store.move(task, to: status) } } label: { Label(status.title, systemImage: status.symbol) }.disabled(task.status == status || store.isMutating) }
                 Divider()
+                if store.orcaPlugin != nil { Button("Link Orca worktree…") { store.worktreeLinkTask = task } }
                 Button("Copy task link") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString("workboard://task/\(task.id)", forType: .string); store.notice = "Task link copied." }
                 Button("Copy resume context") { Task { await store.resumeContext(task) } }
             }

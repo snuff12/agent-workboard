@@ -19,6 +19,12 @@ Replace the executable with an absolute Orca CLI path. No automatic executable d
 
 To work by board project, connect the repository at each project's folder. In the app, **Configure and enable** fills in `path:` entries for the board project folders when no repository is set, and **Add board project folders** adds them later.
 
+### From a card
+
+When the plugin is enabled, task details show an **Orca worktree** section. Choose **+** there, or **Link Orca worktree…** in a card's context menu, to pick a worktree. The list starts with the repository at the task project's folder (the repository that contains the folder, or else the repositories inside it); **All repositories** shows every connected repository. Linking records the worktree on the task with the same `worktrees.attach` request as the CLI. The section lists one entry per linked worktree with its repository, branch, and folder, and stays visible after the plugin is disabled. These links no longer repeat under **Artifacts and links**.
+
+### From plugin settings
+
 In **Settings → Plugins → Install**, select the extracted directory. **Configure and enable** accepts the executable and repositories. Choose **Use** and a worktree:
 
 | Feature | Behavior |
