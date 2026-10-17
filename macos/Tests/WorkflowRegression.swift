@@ -29,6 +29,10 @@ import Darwin
         try check(definition["children"].array.first?["children"].array.first?["title"].string == "Grandchild", "Template save flattened nested subtasks")
         try check(definition["assignee"] == .null && definition["status"] == .null && definition["checklist"].array.first?["checked"] == .null && definition["checklist"].array.first?["required"].bool == true, "Template copied runtime state or lost required flag")
         print("✓ Dependency/checklist models, combined filters, 24-hour stale boundary, and run state excluded from recursive templates")
+        let automation = TaskAutomation(.object(["task_id": .string("t"), "state": .string("blocked"), "stage": .string("review"), "revision": .number(3), "attempts": .array([.object(["state": .string("superseded"), "worker_exited": .bool(false)])])]))
+        let single = TaskAutomation(.object(["task_id": .string("t"), "state": .string("running"), "stage": .string("review"), "single_stage": .bool(true), "process": .object(["cursor": .number(0), "preset": .object(["steps": .array([.object(["title": .string("Implementation")])])])])]))
+        try check(single?.title == "Review", "Single-stage action displayed an unrelated preset stage")
+        try check(automation?.title == "Needs attention" && automation?.needsExitConfirmation == true && automation?.revision == 3, "Automation authority or display metadata lost")
     }
     @MainActor static func service(_ executable: String) async throws {
         let directory = URL(fileURLWithPath: "/tmp/wb-flow-\(UUID().uuidString.prefix(8))"), suite = "workboard-workflow-\(UUID())"
@@ -149,6 +153,56 @@ import Darwin
         guard let dismissedItem = store.pendingInbox.first else { throw Failure(description: "Dismiss fixture missing") }
         let dismissed = await store.workflowMutation("inbox.dismiss", params: ["item_id": .string(dismissedItem.id), "expected_revision": .number(Double(dismissedItem.revision))])
         try check(dismissed != nil && store.pendingInbox.isEmpty && store.inbox.contains { $0.id == dismissedItem.id && $0.status == "dismissed" }, "Inbox dismiss did not persist without deleting tasks")
+        let automated = try await create("Automation contract regression")
+        let armed = await store.taskWorkflowMutation("automation.configure", task: automated, fields: ["configuration": .object(["plugin_id": .string("fixture"), "method": .string("automation.start"), "resource_key": .string("fixture-workspace"), "params": .object([:]), "max_reworks": .number(2), "timeout_seconds": .number(60)])])
+        await store.openTask(automated.id)
+        try check(armed && store.automations[automated.id]?.state == "armed" && store.detail?.automation?.stage == "preflight", "Automation did not reach the card and task details through the actual service")
+        let disabledAutomation = await store.taskWorkflowMutation("automation.disable", task: try task(automated.id), fields: ["expected_automation_revision": .number(Double(store.detail?.automation?.revision ?? 0))])
+        try check(disabledAutomation && store.automations[automated.id]?.state == "disabled", "Automation disable did not refresh the board")
+        print("✓ Actual automation configuration, card/detail state, captured revisions, and disable without an executor")
+        let rule = AutomationRuleDraft(.object(["id": .string("review-rule"), "status": .string("review"), "action": .string("stage"), "stage": .string("review"), "skills": .array([.string("review-skill")]), "prompt": .string("Check acceptance"), "instructions": .string("Preserve source")]))
+        try check(rule.json["skills"].array == [.string("review-skill")] && rule.json["prompt"].string == "Check acceptance", "Rule editor lost selected skills or prompt")
+        let defaultsConfig: JSONValue = .object(["plugin_id": .string("fixture"), "method": .string("automation.start"), "resource_key": .string("fixture-workspace"), "params": .object([:]), "max_reworks": .number(1), "timeout_seconds": .number(60), "rules": .array([rule.json])])
+        let savedDefaults = await store.workflowMutation("automation.defaults.set", params: ["project_id": .string(project.id), "enabled": .bool(true), "expected_defaults_revision": .number(0), "configuration": defaultsConfig])
+        try check(savedDefaults?["defaults"]["revision"].int == 1, "Project defaults did not save through the service")
+        let inherited = try await create("Inherited status rules")
+        await store.openTask(inherited.id)
+        try check(store.detail?.automation?.raw["inherited_revision"].int == 1 && store.detail?.automation?.raw["configuration"]["rules"].array.first?["prompt"].string == "Check acceptance", "New card did not inherit project defaults")
+        _ = await store.taskWorkflowMutation("task.update", task: try task(inherited.id), fields: ["goal": .string("Verify inherited review"), "completion_criteria": .string("Review evidence is recorded")])
+        await store.move(try task(inherited.id), to: .review)
+        try check(store.automations[inherited.id]?.stage == "review" && store.automations[inherited.id]?.attempts.count == 1, "Native card move contract did not trigger the review rule")
+        try check(store.automationDefaults[project.id]?["enabled"].bool == true, "Project defaults missing from task creation state")
+        var manualDraft = TaskDraft(projectID: project.id); manualDraft.title = "Manual card skips automation"; manualDraft.goal = "Work by hand"; manualDraft.completionCriteria = "User checks the result"; manualDraft.automationMode = .manual
+        let manualSaved = await store.save(manualDraft)
+        guard let manualCard = store.tasks.first(where: { $0.title == manualDraft.title }) else { throw Failure(description: "Manual creation missing") }
+        try check(manualSaved && store.automations[manualCard.id] == nil, "Manual selection inherited automation")
+        await store.move(manualCard, to: .inProgress)
+        try check(store.automations[manualCard.id] == nil && (try task(manualCard.id)).status == .inProgress, "Manual card move started automation")
+        var manualTemplate = TaskDraft(projectID: project.id); manualTemplate.title = "Manual template family"; manualTemplate.templateID = "builtin-feature"; manualTemplate.templateRevision = store.templates.first { $0.id == "builtin-feature" }?.revision; manualTemplate.automationMode = .manual
+        let manualTemplateSaved = await store.save(manualTemplate)
+        guard let manualParent = store.tasks.first(where: { $0.title == manualTemplate.title }) else { throw Failure(description: "Manual template missing") }
+        try check(manualTemplateSaved && ([manualParent] + store.descendants(of: manualParent)).allSatisfy { store.automations[$0.id] == nil }, "Manual template selection armed a child")
+        var automaticDraft = TaskDraft(projectID: project.id); automaticDraft.title = "Explicit automatic card"; automaticDraft.automationMode = .automatic
+        let automaticSaved = await store.save(automaticDraft)
+        try check(automaticSaved && store.tasks.first(where: { $0.title == automaticDraft.title }).flatMap { store.automations[$0.id] }?.state == "armed", "Explicit automation selection failed")
+        try check(store.processPresets.count == 3, "Built-in process presets missing from the Store")
+        var presetDraft = ProcessPresetDraft(store.processPresets.first { $0["id"].string == "small" }!, duplicate: true)
+        presetDraft.presetID = "swift-docs"; presetDraft.name = "Documentation process"; presetDraft.whenToUse = "Small documentation edits"
+        presetDraft.steps[0].settings.skills = "documentation-skill"; presetDraft.steps[0].settings.prompt = "Inspect the guide"
+        let savedPreset = await store.workflowMutation("automation.presets.save", params: ["preset": presetDraft.json, "expected_preset_revision": .number(0)])
+        try check(savedPreset != nil && store.processPresets.count == 4, "Preset editor data did not reach the service")
+        var selectedDraft = TaskDraft(projectID: project.id); selectedDraft.title = "Selected custom process"; selectedDraft.processPreset = "swift-docs"
+        let selectedSaved = await store.save(selectedDraft)
+        guard let selectedCard = store.tasks.first(where: { $0.title == selectedDraft.title }), let selectedProcess = store.automations[selectedCard.id] else { throw Failure(description: "Custom process creation missing") }
+        try check(selectedSaved && selectedProcess.raw["process"]["preset"]["id"].string == "swift-docs" && selectedProcess.raw["process"]["preset"]["steps"].array.first?["skills"].array == [.string("documentation-skill")], "Task creation lost the selected preset or stage settings")
+        manualDraft.title = "Manual choice ignores old picker"; manualDraft.processPreset = "swift-docs"
+        let manualWithPresetSaved = await store.save(manualDraft)
+        try check(manualWithPresetSaved && store.tasks.first(where: { $0.title == manualDraft.title }).flatMap { store.automations[$0.id] } == nil, "Hidden preset picker overrode manual work")
+        let removedPreset = await store.workflowMutation("automation.presets.delete", params: ["preset_id": .string("swift-docs"), "expected_preset_revision": savedPreset!["preset"]["revision"]])
+        try check(removedPreset != nil && store.processPresets.count == 3 && store.automations[selectedCard.id]?.presetName == "Documentation process", "Deleting a library preset changed a configured task")
+        print("✓ Preset library, editable stage settings, task selection, manual opt-out, and frozen task copy through actual Store/service")
+        print("✓ Creation modes: manual cards and template children skip automation; explicit automation arms without launching")
+        print("✓ Project defaults, rule editor data, inherited cards, and manual status moves through the actual Store/service")
         let oldContext = store.workflowContext
         appearance.dataDirectory = directory.appendingPathComponent("other-board").path; appearance.dataDirectory = directory.path
         await store.reload(force: true)

@@ -57,6 +57,8 @@ class Kit(unittest.TestCase):
             "workboard trash empty": "prompt",
             "workboard backup restore FILE": "prompt",
             "workboard plugin run orca agents.start": "prompt",
+            "workboard automation settle --exit-code 0 --source-dir SOURCE": "prompt",
+            "workboard automation submit-report FILE": "prompt",
             "workboard rpc task.update --params {}": "prompt",
         }
         for command, decision in expected.items():

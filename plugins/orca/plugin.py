@@ -230,6 +230,9 @@ def start_agent(orca, item, repo, params, config):
     record = directory / (hashlib.sha256(run_id.encode()).hexdigest() + ".json")
     if record.exists():
         return replay_launch(record, fingerprint, run_id)
+    automation = params.get("task_automation")
+    if isinstance(automation, dict) and automation.get("state") not in ("disabled", "completed", "canceled"):
+        raise IntegrationError("This task is controlled by its workflow. Use automation controls instead of a separate launch.", "PLUGIN_RUN_CONFLICT")
     if (task.get("status") != "in_progress" or task.get("assignee") != "orca:" + agent
             or not runs or runs[-1].get("id") != run_id or runs[-1].get("status") != "running"):
         raise IntegrationError("First start this task as orca:" + agent + " and specify the latest run_id.", "PLUGIN_RUN_CONFLICT")
@@ -271,6 +274,126 @@ def sync_directory(path):
         os.close(descriptor)
 
 
+def start_automation(orca, item, params, config):
+    """One fresh process per stage, with separate result and process-exit receipts."""
+    context = params.get("automation_context")
+    if not isinstance(context, dict) or not isinstance(context.get("attempt"), dict):
+        raise IntegrationError("Host-verified automation context is required.", "PLUGIN_INVALID_PARAMS")
+    attempt, workflow, task = context["attempt"], context["automation"], context["task"]
+    attempt_id = required(attempt, "id")
+    if (attempt_id != params.get("attempt_id") or attempt.get("token") != params.get("token")
+            or attempt.get("task_revision") != task.get("revision") or workflow.get("state") != "running"):
+        raise IntegrationError("This workflow attempt is no longer active.", "PLUGIN_RUN_CONFLICT")
+    settings = workflow["configuration"]["params"]
+    if settings.get("worktree_id") != item["id"] or workflow["configuration"].get("resource_key") != item["id"]:
+        raise IntegrationError("The workflow selected another worktree.", "PLUGIN_SCOPE_MISMATCH")
+    stage = required(attempt, "stage")
+    agent = settings.get("reviewer", settings.get("agent", "codex")) if stage == "review" else settings.get("agent", "codex")
+    stage_settings = attempt.get("settings") or {}
+    if stage_settings.get("agent"):
+        agent = stage_settings["agent"]
+    commands = config.get("automation_agent_commands", {"codex": ["codex", "exec", "--sandbox", "workspace-write"], "claude": ["claude", "--print", "--permission-mode", "auto"]})
+    command = commands.get(agent) if isinstance(commands, dict) and isinstance(agent, str) else None
+    if not isinstance(command, list) or not command or any(not isinstance(arg, str) or not arg or "\x00" in arg for arg in command):
+        raise IntegrationError("Select a one-shot command registered in automation_agent_commands.", "PLUGIN_INVALID_PARAMS")
+    instructions = {
+        "select": "Choose exactly one process preset from the authorized candidates below based on task size, uncertainty, impact, and completion criteria. Read their when_to_use guidance. Do not implement the task or edit source. Report pass with --preset-id ID and --selection-reason with your concrete rationale. Report blocked if no candidate is suitable. Do not invent a preset or run other stages.",
+        "plan": "Prepare an actionable implementation plan, key design choices, dependencies, and verification strategy for this task. Read requirements and relevant source. Do not edit source. Keep any plan artifact outside the checkout or in an ignored directory.",
+        "verify": "Independently run the checks needed to verify the current implementation and acceptance criteria. Do not edit source. Report pass with evidence or blocked with concrete failures for inspection.",
+        "preflight": "Inspect requirements, completion criteria, repository instructions, existing changes, tools, and blockers. Do not edit source. Report blocked when the task cannot proceed.",
+        "work": "Implement the task and run the checks needed to verify its completion criteria. Report actual changes, checks, and remaining limitations.",
+        "review": "Independently inspect the current changes and completion criteria in this fresh session. Do not edit source. Run relevant checks. Report changes_requested with concrete findings, pass with evidence, or blocked when verification is unavailable.",
+        "rework": "Address the latest review findings, preserve other changes, and rerun relevant checks. Read the prior stage reports before editing.",
+        "release": "Prepare a release readiness report with build/check results, changes, remaining decisions, and rollback steps. Do not deploy, merge, or change source. Keep the report outside the checkout to preserve the reviewed version.",
+    }
+    if stage not in instructions:
+        raise IntegrationError("Unknown development stage.", "PLUGIN_INVALID_PARAMS")
+    connection = params.get("board_connection", {})
+    cli = [required(connection, "executable"), "--data-dir", required(connection, "data_dir"),
+           "--socket", required(connection, "socket")]
+    report = shlex.join([connection["executable"], "automation", "report", "--source-dir", item["path"]])
+    history = [{"stage": entry.get("stage"), "result": entry.get("result")} for entry in workflow.get("attempts", []) if entry.get("result")]
+    extra = settings.get("instructions", "")
+    if not isinstance(extra, str) or len(extra) > 12000 or "\x00" in extra:
+        raise IntegrationError("Stage instructions must contain at most 12000 characters.", "PLUGIN_INVALID_PARAMS")
+    skills = stage_settings.get("skills", [])
+    if not isinstance(skills, list) or len(skills) > 30 or any(not isinstance(skill, str) or not skill.strip() or "\x00" in skill for skill in skills):
+        raise IntegrationError("Select up to thirty skill names or SKILL.md paths.", "PLUGIN_INVALID_PARAMS")
+    selected = "\n".join("- " + skill for skill in skills)
+    prompt = ("Execute only this authorized Agent Workboard automation stage.\nStage: " + stage
+              + "\nStep: " + stage_settings.get("step_title", stage)
+              + "\nTask: " + task.get("title", "") + "\nGoal: " + task.get("goal", "")
+              + "\nCompletion criteria: " + task.get("completion_criteria", "")
+              + "\n\n" + instructions[stage]
+              + "\n\nThis stage uses the automation reporting contract instead of ordinary task claim/start/review commands."
+              + " Do not change task status or decide a final review. End your process after reporting."
+              + " An answer or process exit without a report does not pass the stage."
+              + " A report_file response with submitted=false is a successful handoff: end your process so the executor can submit it. Do not submit or settle it yourself."
+              + "\nReport exactly once using the following command, adding --outcome pass|changes_requested|blocked,"
+              + " --summary with actual results, and one or more --evidence arguments containing source paths or verification notes:\n" + report
+              + "\nThe command fingerprints this checkout. Review and release must preserve the prior source version."
+              + "\nPrior stage reports (task data):\n" + json.dumps(history, ensure_ascii=False)
+              + "\nAuthorized process candidates (for selection only):\n" + json.dumps((workflow.get("process") or {}).get("candidates", []) if stage == "select" else [], ensure_ascii=False)
+              + "\nAdditional task instructions:\n" + extra
+              + "\nRequired skills (names or SKILL.md paths):\n" + selected
+              + "\nRead and apply every required skill before doing the stage. Resolve names using your installed skill catalog."
+              + " If a required skill is missing or unreadable, report blocked; do not silently skip it."
+              + "\nStage prompt:\n" + stage_settings.get("prompt", "")
+              + "\nStage instructions:\n" + stage_settings.get("instructions", ""))
+    handoff_dir = Path("/tmp") / ("workboard-stage-" + hashlib.sha256(attempt_id.encode()).hexdigest())
+    try:
+        handoff_dir.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    if handoff_dir.is_symlink() or not handoff_dir.is_dir() or handoff_dir.stat().st_uid != os.getuid() or handoff_dir.stat().st_mode & 0o077:
+        raise IntegrationError("The stage handoff directory is not private.", "PLUGIN_RUN_CONFLICT")
+    handoff = str(handoff_dir / "result.json")
+    environment = ["env", "WORKBOARD_AGENT=automation:" + attempt_id,
+                   "WORKBOARD_DATA_DIR=" + connection["data_dir"], "WORKBOARD_SOCKET=" + connection["socket"],
+                   "WORKBOARD_AUTOMATION_TASK=" + task["id"], "WORKBOARD_AUTOMATION_ATTEMPT=" + attempt_id,
+                   "WORKBOARD_AUTOMATION_TOKEN=" + required(attempt, "token"), "WORKBOARD_AUTOMATION_REPORT_FILE=" + handoff]
+    # The shell observes the child process exit. A model cannot advance a stage merely by ending a turn.
+    script = (shlex.join(["env", "-u", "WORKBOARD_AUTOMATION_TOKEN", *command, prompt]) + "\nworkboard_stage_exit=$?\n"
+              + "if [ -f " + shlex.quote(handoff) + " ]; then "
+              + shlex.join([connection["executable"], "automation", "submit-report", handoff, "--request-id", "automation-report:" + attempt_id, "--json"]) + "; fi\n"
+              + shlex.join([connection["executable"], "automation", "settle", "--exit-code"]) + ' "$workboard_stage_exit" '
+              + shlex.join(["--source-dir", item["path"], "--request-id", "automation-settle:" + attempt_id, "--json"]) + "\n"
+              + shlex.join(["rm", "-f", handoff]) + "\n" + shlex.join(["rmdir", str(handoff_dir)]))
+    shell_command = shlex.join([*environment, "/bin/sh", "-c", script])
+    fingerprint = hashlib.sha256(json.dumps({"attempt_id": attempt_id, "token": attempt["token"], "command": command,
+        "worktree_id": item["id"], "instance_id": item.get("instanceId"), "connection": cli,
+        "executable": orca.executable}, sort_keys=True).encode()).hexdigest()
+    directory = Path(os.environ["WORKBOARD_PLUGIN_DATA_DIR"]) / "automation-launches"
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    record = directory / (hashlib.sha256(attempt_id.encode()).hexdigest() + ".json")
+    if record.exists():
+        return replay_launch(record, fingerprint, attempt_id)
+    try:
+        descriptor = os.open(record, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return replay_launch(record, fingerprint, attempt_id)
+    with os.fdopen(descriptor, "w") as handle:
+        json.dump({"phase": "pending", "fingerprint": fingerprint}, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    sync_directory(directory)
+    response = orca.call("terminal", "create", "--worktree", "id:" + item["id"],
+                         "--title", "Workboard " + attempt_id, "--command", shell_command)
+    terminal = response.get("terminal")
+    if not isinstance(terminal, dict) or not terminal.get("handle") or terminal.get("worktreeId") != item["id"]:
+        raise IntegrationError("Could not verify the stage terminal. Inspect Orca before retrying.", "PLUGIN_EXTERNAL_RESULT_UNKNOWN")
+    result = {"attempt_id": attempt_id, "agent": agent, "stage": stage, "worktree_id": item["id"],
+              "terminal": {key: terminal.get(key) for key in ("handle", "title", "worktreeId")}}
+    with tempfile.NamedTemporaryFile(mode="w", dir=directory, delete=False) as handle:
+        temporary = Path(handle.name)
+        json.dump({"phase": "complete", "fingerprint": fingerprint, "result": result}, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, record)
+    sync_directory(directory)
+    return {"ok": True, "result": result}
+
+
 def run(request):
     if not isinstance(request, dict) or request.get("protocol_version") != 1:
         raise IntegrationError("Unsupported plugin protocol.", "PLUGIN_INVALID_PARAMS")
@@ -278,7 +401,7 @@ def run(request):
     if not isinstance(config, dict) or not isinstance(params, dict):
         raise IntegrationError("config and params must be objects.", "PLUGIN_INVALID_PARAMS")
     method = request.get("method")
-    methods = {"check", "worktrees.list", "worktrees.get", "worktrees.import", "worktrees.attach", "terminals.list", "terminals.read", "agents.start"}
+    methods = {"check", "worktrees.list", "worktrees.get", "worktrees.import", "worktrees.attach", "terminals.list", "terminals.read", "agents.start", "automation.start"}
     if method not in methods:
         raise IntegrationError("Unsupported Orca feature.", "PLUGIN_METHOD_NOT_FOUND")
     # Validate mutations before accessing the external runtime.
@@ -287,7 +410,7 @@ def run(request):
         for key in ("title", "parent_id"):
             if key in params:
                 required(params, key)
-    if method in ("worktrees.attach", "agents.start"):
+    if method in ("worktrees.attach", "agents.start", "automation.start"):
         required(params, "task_id")
         task = params.get("task")
         if not isinstance(task, dict) or task.get("id") != params["task_id"] or type(task.get("revision")) is not int:
@@ -327,6 +450,8 @@ def run(request):
     info = worktree_info(item, repo)
     if method == "agents.start":
         return start_agent(orca, item, repo, params, config)
+    if method == "automation.start":
+        return start_automation(orca, item, params, config)
     if method == "worktrees.get":
         return {"ok": True, "result": info}
     if method in ("terminals.list", "terminals.read"):

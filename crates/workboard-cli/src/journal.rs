@@ -1,5 +1,5 @@
-//! Durable idempotency for optional plugin side effects.
-//! A pending call is never repeated automatically: the process may have changed an external service.
+//! Durable idempotency for optional plugin side effects and revision-pinned core requests.
+//! An external pending call is never repeated: it may have changed an external service.
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,6 +42,25 @@ pub fn begin(
     data_dir: &Path,
     request_id: &str,
     payload: &Value,
+) -> Result<(Ticket, State), String> {
+    begin_with_mode(data_dir, request_id, payload, false)
+}
+
+/// A core caller must persist its exact parameters with prepare before sending any request.
+/// A pending marker therefore means no mutation was sent and can safely resolve context again.
+pub fn begin_core(
+    data_dir: &Path,
+    request_id: &str,
+    payload: &Value,
+) -> Result<(Ticket, State), String> {
+    begin_with_mode(data_dir, request_id, payload, true)
+}
+
+fn begin_with_mode(
+    data_dir: &Path,
+    request_id: &str,
+    payload: &Value,
+    core_request: bool,
 ) -> Result<(Ticket, State), String> {
     if request_id.trim().is_empty() || request_id.len() > 200 {
         return Err("INVALID_REQUEST: request_id must contain 1 to 200 characters.".into());
@@ -104,6 +123,7 @@ pub fn begin(
         match (record.phase.as_str(),record.value) {
             ("prepared",Some(value))=>State::Prepared(value),
             ("complete",Some(value))=>State::Complete(value),
+            ("pending",_) if core_request=>State::Fresh,
             ("pending",_)=>return Err("PLUGIN_RESULT_UNCERTAIN: The previous external execution has an uncertain result. Check the external service before using a new request.".into()),
             _=>return Err(io_error("Invalid request journal state.")),
         }
@@ -167,6 +187,23 @@ mod tests {
             std::env::temp_dir().join(format!("workboard-journal-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&path).unwrap();
         path
+    }
+    #[test]
+    fn core_retry_recovers_before_send_and_keeps_prepared_parameters() {
+        let directory = dir();
+        let payload = json!({"kind":"automation-control","method":"automation.disable"});
+        let (ticket, state) = begin_core(&directory, "core-retry", &payload).unwrap();
+        assert_eq!(state, State::Fresh);
+        drop(ticket);
+        let (ticket, state) = begin_core(&directory, "core-retry", &payload).unwrap();
+        assert_eq!(state, State::Fresh);
+        let prepared = json!({"params":{"expected_revision":5,"expected_automation_revision":9}});
+        ticket.prepare(&prepared).unwrap();
+        drop(ticket);
+        let (ticket, state) = begin_core(&directory, "core-retry", &payload).unwrap();
+        assert_eq!(state, State::Prepared(prepared));
+        drop(ticket);
+        fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn completed_retry_and_payload_conflict() {

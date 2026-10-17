@@ -8,6 +8,8 @@ struct BoardView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var showingFilters = false
     @State private var showingTemplates = false
+    @State private var showingProcessPresets = false
+    @State private var automationProject: BoardProject?
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
@@ -45,6 +47,8 @@ struct BoardView: View {
         } message: { task in Text(deletionMessage(task)) }
         .sheet(isPresented: $showingFilters) { ViewFilterPanel() }
         .sheet(isPresented: $showingTemplates) { TemplateLibraryView() }
+        .sheet(isPresented: $showingProcessPresets) { ProcessPresetLibraryView() }
+        .sheet(item: $automationProject) { project in AutomationConfigurationView(project: project) }
         .alert("Could not process the request", isPresented: Binding(get: { store.actionError != nil }, set: { if !$0 { store.actionError = nil } })) { Button("OK") { store.actionError = nil } } message: { Text(store.actionError ?? "") }
         .overlay(alignment: .bottom) {
             if let notice = store.notice {
@@ -129,6 +133,10 @@ struct BoardView: View {
             Spacer(minLength: 0)
             if store.isTrashView {
                 Button("Empty Trash…", role: .destructive) { store.confirmingEmptyTrash = true }.buttonStyle(BoardSecondaryButtonStyle()).disabled(store.trash.isEmpty || store.isMutating).accessibilityIdentifier("trash-empty")
+            }
+            Button { showingProcessPresets = true } label: { Image(systemName: "list.bullet.rectangle") }.help("Process presets").accessibilityIdentifier("process-presets")
+            if let project = store.currentProject {
+                Button { automationProject = project } label: { Image(systemName: "gearshape.2") }.help("Project automation defaults").accessibilityIdentifier("project-automation")
             }
             if !store.isInboxView && !store.isTrashView {
                 Picker("Layout", selection: $store.selectedLayout) { Image(systemName: "rectangle.split.3x1").tag("board").help("Kanban"); Image(systemName: "list.bullet").tag("list").help("List"); Image(systemName: "calendar").tag("week").help("Weekly planner") }.pickerStyle(.segmented).labelsHidden().frame(width: 110)
@@ -260,6 +268,9 @@ struct TaskCard: View {
                     if task.priority >= 3 { Image(systemName: "flag.fill").font(.system(size: 9)).foregroundStyle(.orange).padding(.top, 3).help("High priority") }
                 }
                 if !task.goal.isEmpty && appearance.theme.density == .comfortable { Text(task.goal).font(.system(size: 11 * appearance.theme.fontScale)).foregroundStyle(Color.secondary).lineLimit(2).multilineTextAlignment(.leading) }
+                if let automation = store.automations[task.id], automation.state != "disabled" {
+                    Label(automation.title, systemImage: "gearshape.2").font(.system(size: 10)).foregroundStyle(automation.state == "blocked" ? .orange : appearance.accent).lineLimit(1)
+                }
                 if !task.blockedReason.isEmpty { Label("Blocked · \(task.blockedReason)", systemImage: "exclamationmark.circle").font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2).multilineTextAlignment(.leading) }
                 if !task.blockedBy.isEmpty { Label("Prerequisites remaining: \(task.blockedBy.count)", systemImage: "hourglass").font(.system(size: 10)).foregroundStyle(.orange) }
                 else if task.ready { Label("Ready", systemImage: "play.circle").font(.system(size: 10)).foregroundStyle(appearance.accent.opacity(0.8)) }

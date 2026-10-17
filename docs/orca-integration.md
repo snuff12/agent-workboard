@@ -1,5 +1,7 @@
 # Orca plugin
 
+Version 0.3.0 adds the optional `automation.start` executor for the board's [development workflow](automation.md). It uses fresh one-shot agent processes in existing local worktrees. The board controls stages through explicit result and process-exit receipts. Existing manual launches remain available for tasks without an active workflow.
+
 Browse local Orca worktrees/terminals, import a selected worktree as a task/subtask, attach it to existing work, or launch Codex/Claude in an Orca terminal. Only the board service changes task data.
 
 The optional plugin requires Orca app/CLI and Python 3. The core contains neither provider code nor Python. Installation leaves it disabled. Launches require a current board build supporting host-provided `task_runs` and `board_connection`.
@@ -8,8 +10,8 @@ The optional plugin requires Orca app/CLI and Python 3. The core contains neithe
 
 ```sh
 scripts/package-plugins.sh
-unzip dist/AgentWorkboard-plugin-orca-0.2.0.zip -d /tmp/workboard-orca
-workboard plugin install /tmp/workboard-orca/orca-0.2.0
+unzip dist/AgentWorkboard-plugin-orca-0.5.0.zip -d /tmp/workboard-orca
+workboard plugin install /tmp/workboard-orca/orca-0.5.0
 workboard plugin enable orca --executable /path/to/orca \
   --config '{"repos":["path:/path/to/first-repo","path:/path/to/second-repo"]}'
 workboard plugin check orca --json

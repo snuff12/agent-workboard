@@ -29,6 +29,21 @@ struct TaskEditorView: View {
                         else { draft.templateRevision = nil }
                     }
                 }
+                if draft.editingTask == nil {
+                    Section {
+                        Picker("Execution", selection: $draft.automationMode) {
+                            ForEach(TaskAutomationMode.allCases) { Text($0.title).tag($0) }
+                        }.accessibilityIdentifier("task.automation-mode")
+                        if draft.automationMode != .manual {
+                            ProcessPresetPicker(selection: $draft.processPreset, presets: store.processPresets, includeDefault: true)
+                            if draft.processPreset == "auto" { Text("An agent will choose a process and record its reason before work starts.").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        Text(automationDescription).font(.caption).foregroundStyle(Color.secondary)
+                        if (draft.automationMode == .automatic || !draft.processPreset.isEmpty) && draft.automationMode != .manual && !hasSavedAutomation {
+                            Text("Save project automation defaults before choosing automation.").font(.caption).foregroundStyle(.red)
+                        }
+                    } header: { Text("Automation") }
+                }
                 Section {
                     TextField("What needs to be done?", text: $draft.title).font(.title3).focused($titleFocused)
                     if draft.editingTask == nil { Picker("Status", selection: $draft.status) { ForEach(WorkStatus.allCases.filter(\.acceptsNewTasks)) { Label($0.title, systemImage: $0.symbol).tag($0) } }.accessibilityIdentifier("task.status") }
@@ -78,8 +93,16 @@ struct TaskEditorView: View {
                 if let error = store.actionError { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
             }.formStyle(.grouped).environment(\.timeZone, TimeZone(identifier: draft.timeZoneID) ?? .current)
             Divider()
-            HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if store.isMutating { ProgressView().controlSize(.small) }; Button(draft.editingTask == nil ? "Create task" : "Save changes") { Task { _ = await store.save(draft) } }.buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent)).keyboardShortcut(.defaultAction).disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isMutating) }.padding(20)
+            HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if store.isMutating { ProgressView().controlSize(.small) }; Button(draft.editingTask == nil ? "Create task" : "Save changes") { Task { _ = await store.save(draft) } }.buttonStyle(BoardPrimaryButtonStyle(color: appearance.accent)).keyboardShortcut(.defaultAction).disabled(draft.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isMutating || (draft.editingTask == nil && (draft.automationMode == .automatic || !draft.processPreset.isEmpty) && draft.automationMode != .manual && !hasSavedAutomation)) }.padding(20)
         }.frame(width: 560, height: 730).background(Color(nsColor: .windowBackgroundColor)).tint(appearance.accent).onAppear { titleFocused = true; store.actionError = nil; if draft.workflowContext == nil { draft.workflowContext = store.workflowContext } }
+    }
+    private var hasSavedAutomation: Bool { store.automationDefaults[draft.projectID]?["configuration"] != nil && store.automationDefaults[draft.projectID]?["configuration"] != .null }
+    private var automationDescription: String {
+        switch draft.automationMode {
+        case .manual: "Status changes will not start agents. You can configure automation later. Applies to every subtask created from a template."
+        case .automatic: "Use the saved project workflow for this task and its template subtasks. Agents start only after a matching status change."
+        case .inherit: store.automationDefaults[draft.projectID]?["enabled"].bool == true ? "This project uses automation for new tasks. Choose Manual work to skip it for this task and its template subtasks." : "This project creates manual tasks by default."
+        }
     }
     private var editingCalendar: Calendar { var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: draft.timeZoneID) ?? .current; return calendar }
     private var timeZoneOptions: [String] {

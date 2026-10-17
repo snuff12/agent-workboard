@@ -48,6 +48,7 @@ struct TaskDetailView: View {
                         DetailSection(title: "Goal", symbol: "scope") { detailText(detail.task.goal, empty: "No goal yet. Add the task’s purpose in the editor.") }
                         DetailSection(title: "Completion criteria", symbol: "checkmark.seal") { detailText(detail.task.completionCriteria, empty: "Describe the outcome that completes this task.") }
                         TaskWorkflowSections(task: detail.task, decisions: detail.reviewDecisions).id(store.workflowGeneration)
+                        if detail.automation != nil || store.orcaPlugin?.methods.contains("automation.start") == true { TaskAutomationSection(detail: detail).id(detail.task.id) }
                         if !detail.task.completionSummary.isEmpty { DetailSection(title: "Outcome", symbol: "checkmark.circle") { detailText(detail.task.completionSummary, empty: "") } }
                         children(detail)
                         if store.orcaPlugin != nil || detail.artifacts.contains(where: \.isOrcaWorktree) { orcaWorktrees(detail) }

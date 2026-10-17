@@ -3,6 +3,26 @@
 # validates claims, revisions, and retries. Destructive, broad, or user-only commands ask first.
 # The installer appends the same rules for the absolute paths of the installed executable.
 prefix_rule(
+    pattern = ["workboard", "automation", "preset", ["list", "show", "apply"]],
+    decision = "allow",
+    justification = "Preset selection checks task ownership and revisions and does not start agents.",
+)
+prefix_rule(
+    pattern = ["workboard", "automation", "preset", ["save", "delete"]],
+    decision = "prompt",
+    justification = "Changing the shared preset library belongs to the user.",
+)
+prefix_rule(
+    pattern = ["workboard", "automation", ["show", "list", "defaults", "fingerprint", "report"]],
+    decision = "allow",
+    justification = "Stage reports use a private handoff and never approve or complete a task.",
+)
+prefix_rule(
+    pattern = ["workboard", "automation", ["configure", "set-defaults", "start", "pause", "resume", "disable", "resolve", "worker", "submit-report", "settle"]],
+    decision = "prompt",
+    justification = "Workflow controls can launch agents or change execution authority.",
+)
+prefix_rule(
     pattern = ["workboard", ["project", "task", "inbox", "template", "view", "board", "events", "doctor", "agent", "trash"]],
     decision = "allow",
     justification = "Board reads and task updates go through the board service.",

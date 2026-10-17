@@ -2,6 +2,18 @@
 
 The board is the shared record of work for people and agents on this Mac. Use the `workboard` CLI. Put options after the subcommand, for example `workboard task show <task-id> --json`. Commands that accept `--agent` use your agent ID automatically.
 
+## Automated stages
+
+When `WORKBOARD_AUTOMATION_ATTEMPT` is present, the user has enabled a workflow and the launch prompt names one stage. Follow that stage's scope and reporting instructions instead of ordinary task claim/start/review commands. Read the task and prior reports, submit evidence with `workboard automation report --source-dir <checkout>`, then end the process. The executor separately confirms process exit. Orca keeps callback credentials in its wrapper and removes them from the agent environment; the private report handoff requires no token. Do not settle your own process, approve a review, complete the task, deploy, or merge. Selection, preflight, planning, verification, review, and release stages must preserve the source version it received. Do not print or attach the attempt token.
+
+## Choose a process preset
+
+When a task needs automation, inspect `workboard automation preset list --json` and `workboard automation preset show PRESET_ID --json`. Choose according to scope, uncertainty, and verification needs: small has implementation and review; standard adds preflight and release preparation; large adds explicit planning and verification. Custom presets include `when_to_use` guidance. Use the simplest process that covers the task's risks and completion criteria.
+
+For an inactive, configured task that you hold or that is unassigned, use `workboard automation preset apply TASK_ID --preset PRESET_ID --reason "<why this process fits>" --json`. This records your choice without starting an agent. To delegate selection, use `--preset auto`. When creating an automated task, use `workboard task add ... --process-preset PRESET_ID --preset-reason "<why>"`; saved project executor defaults are required. Choose `--automation manual` for work that needs no automated process. Do not change an active process or another agent's assignment.
+
+During a `select` stage, read only the task and authorized preset candidates in the launch prompt. Report the selected ID with `--preset-id PRESET_ID --selection-reason "<why>"`, evidence, and the normal source fingerprint. Do not create or edit presets, start tasks, or launch another agent. The service accepts only an authorized candidate and advances after process exit. Configured tasks keep a frozen copy of the selected stages.
+
 ## Start of work
 
 - Read the board context that the session start added, or run `workboard agent context`. It shows your agent ID, the project for this directory, your tasks, work in progress, reviews, and ready tasks.
@@ -43,3 +55,5 @@ When the user asks for work based on a Slack message, email, issue, or document,
 ## Never
 
 Do not cancel or delete tasks, restore or empty the trash, delete other board data, restore backups, run or change plugins, or edit the board database unless the user explicitly asks. When the user asks, cancel with `workboard task cancel <task-id> --expected-revision <revision>`. With an agent ID, `task update --status` cannot set `done` or `canceled`.
+
+A stage report can return `report_file` and `submitted: false`. This is a successful private handoff. End the stage process; the executor submits the file and confirms exit. Do not run `automation submit-report` or `automation settle` yourself.

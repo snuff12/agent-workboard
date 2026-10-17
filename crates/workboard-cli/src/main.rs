@@ -1,4 +1,5 @@
 mod agent;
+mod automation;
 mod cancellation;
 mod journal;
 mod plugins;
@@ -41,6 +42,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Configure and run durable agent workflows")]
+    Automation {
+        #[command(subcommand)]
+        command: automation::AutomationCommand,
+    },
     #[command(about = "Manage projects")]
     Project {
         #[command(subcommand)]
@@ -149,6 +155,12 @@ enum ProjectCommand {
 struct TaskInput {
     #[arg(long)]
     project: String,
+    #[arg(long, default_value = "inherit", value_parser = ["inherit", "automatic", "manual"], help = "Use project defaults, force its saved workflow, or create manual work")]
+    automation: String,
+    #[arg(long, help = "Process preset ID, or auto to let an agent choose")]
+    process_preset: Option<String>,
+    #[arg(long, help = "Why this process fits the task")]
+    preset_reason: Option<String>,
     #[arg(long)]
     title: String,
     #[arg(long)]
@@ -716,6 +728,11 @@ fn main() {
         output(&response, cli.json);
         std::process::exit(if response["ok"] == true { 0 } else { 1 });
     }
+    if let Commands::Automation { ref command } = cli.command {
+        let response = automation::execute(&client, command, &request_id, cli.expected_revision);
+        output(&response, cli.json);
+        std::process::exit(if response["ok"] == true { 0 } else { 1 });
+    }
     let is_rpc = matches!(cli.command, Commands::Rpc { .. });
     let (method, mut params) = match cli.command {
         Commands::Project { command } => match command {
@@ -744,6 +761,9 @@ fn main() {
                     ("project_id", Some(json!(input.project))),
                     ("parent_id", string(input.parent)),
                     ("title", Some(json!(input.title))),
+                    ("automation_mode", Some(json!(input.automation))),
+                    ("process_preset", string(input.process_preset)),
+                    ("preset_reason", string(input.preset_reason)),
                     ("status", string(input.status)),
                     ("goal", Some(json!(input.goal))),
                     (
@@ -992,7 +1012,10 @@ fn main() {
             TrashCommand::Delete { task_id } => ("trash.purge".into(), json!({"task_id":task_id})),
             TrashCommand::Empty => ("trash.empty".into(), json!({})),
         },
-        Commands::Plugin { .. } | Commands::Serve | Commands::Agent { .. } => unreachable!(),
+        Commands::Plugin { .. }
+        | Commands::Serve
+        | Commands::Agent { .. }
+        | Commands::Automation { .. } => unreachable!(),
     };
     // Agent sessions identify themselves without repeating --agent. Raw `rpc` stays explicit.
     if !is_rpc {
