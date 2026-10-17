@@ -927,7 +927,7 @@ fn workflow_backup_restore_export_and_revision_watermarks_preserve_all_entities(
 #[test]
 fn version_four_migration_preserves_tasks_and_seeds_templates_once() {
     let (dir, b, _, t) = setup();
-    b.conn.execute_batch("DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; PRAGMA user_version=4;").unwrap();
+    b.conn.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; PRAGMA user_version=4;").unwrap();
     drop(b);
     let mut b = Board::open(dir.path()).unwrap();
     assert_eq!(get(&mut b, &t)["task"]["title"], "Task");
@@ -1135,7 +1135,7 @@ fn legacy_skipped_civil_day_survives_v4_migration_and_restore_without_blocking_v
     // These exact values were valid under the version 4 date-only validator. Recreate that
     // schema and data without sending an invalid new write through the version 5 API.
     b.conn.execute("UPDATE tasks SET scheduled_start='2011-12-30',scheduled_end='2011-12-31',time_zone='Pacific/Apia' WHERE id=?1",[&t]).unwrap();
-    b.conn.execute_batch("DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; PRAGMA user_version=4;").unwrap();
+    b.conn.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; PRAGMA user_version=4;").unwrap();
     let backup = dir.path().join("legacy-v4.sqlite3");
     b.backup(&backup).unwrap();
     let original_backup = fs::read(&backup).unwrap();
@@ -1186,6 +1186,8 @@ fn downgrade_to_v5(path: &Path) {
     raw.execute_batch(r#"
 PRAGMA foreign_keys=OFF;
 BEGIN;
+DROP TABLE automations;
+DROP TABLE automation_executors;
 CREATE TABLE tasks_v5 (
  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), parent_id TEXT REFERENCES tasks(id),
  title TEXT NOT NULL, goal TEXT NOT NULL DEFAULT '', completion_criteria TEXT NOT NULL DEFAULT '',

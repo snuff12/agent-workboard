@@ -10,6 +10,9 @@ import Combine
     static let trashScope = "@workboard-trash"
     @Published var projects: [BoardProject] = []
     @Published var tasks: [BoardTask] = []
+    @Published var automations: [String: TaskAutomation] = [:]
+    @Published var processPresets: [JSONValue] = []
+    @Published var automationDefaults: [String: JSONValue] = [:]
     @Published var templates: [TaskTemplate] = []
     @Published var savedViews: [SavedTaskView] = []
     @Published var inbox: [InboxItem] = []
@@ -109,7 +112,7 @@ import Combine
         if connectionIdentity != nil { pendingDeepLink = nil }
         connectionIdentity = identity; connectionGeneration = UUID()
         eventSequence = nil; widgetConfigurationKey = nil; lastUpdated = nil
-        projects = []; tasks = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
+        projects = []; tasks = []; automations = [:]; automationDefaults = [:]; processPresets = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
         templates = []; savedViews = []; inbox = []; trash = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
         queryResultIDs = nil; queryResultKey = nil
         draft = nil; completionTask = nil; deletionTask = nil; purgeItem = nil; confirmingEmptyTrash = false; undoDeletion = nil; showingNewProject = false
@@ -142,6 +145,9 @@ import Combine
             if sequence != eventSequence || force || lastUpdated == nil {
                 projects = snapshot["projects"].array.compactMap(BoardProject.init)
                 tasks = snapshot["tasks"].array.compactMap(BoardTask.init)
+                automations = Dictionary(uniqueKeysWithValues: snapshot["automations"].array.compactMap(TaskAutomation.init).map { ($0.taskID, $0) })
+                processPresets = snapshot["process_presets"].array
+                automationDefaults = Dictionary(uniqueKeysWithValues: snapshot["automation_defaults"].array.compactMap { value in value["project_id"].string.map { ($0, value) } })
                 templates = snapshot["templates"].array.compactMap(TaskTemplate.init)
                 let previousView = savedViews.first { $0.id == selectedViewID }
                 savedViews = snapshot["views"].array.compactMap(SavedTaskView.init)
@@ -246,7 +252,8 @@ import Combine
     }
     func save(_ draft: TaskDraft) async -> Bool {
         if let templateID = draft.templateID, draft.editingTask == nil {
-            var params: [String: JSONValue] = ["template_id": .string(templateID), "project_id": .string(draft.projectID), "title": .string(draft.title.trimmingCharacters(in: .whitespacesAndNewlines))]
+            var params: [String: JSONValue] = ["template_id": .string(templateID), "project_id": .string(draft.projectID), "title": .string(draft.title.trimmingCharacters(in: .whitespacesAndNewlines)), "automation_mode": .string(draft.automationMode.rawValue)]
+            if draft.automationMode != .manual && !draft.processPreset.isEmpty { params["process_preset"] = .string(draft.processPreset) }
             if let parentID = draft.parentID { params["parent_id"] = .string(parentID) }
             if draft.status != .todo { params["status"] = .string(draft.status.rawValue) }
             if let revision = draft.templateRevision { params["expected_revision"] = .number(Double(revision)) }
@@ -265,7 +272,8 @@ import Combine
         if let task = draft.editingTask {
             method = "task.update"; params["task_id"] = .string(task.id); params["expected_revision"] = .number(Double(task.revision)); params["blocked_reason"] = .string(draft.blockedReason); params["parent_id"] = draft.parentID.map(JSONValue.string) ?? .null
         } else {
-            method = "task.create"; params["project_id"] = .string(draft.projectID)
+            method = "task.create"; params["project_id"] = .string(draft.projectID); params["automation_mode"] = .string(draft.automationMode.rawValue)
+            if draft.automationMode != .manual && !draft.processPreset.isEmpty { params["process_preset"] = .string(draft.processPreset) }
             if let parentID = draft.parentID { params["parent_id"] = .string(parentID) }
             if draft.status != .todo { params["status"] = .string(draft.status.rawValue) }
         }

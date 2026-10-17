@@ -27,6 +27,8 @@ struct Manifest {
     #[serde(default)]
     task_context_methods: Vec<String>,
     #[serde(default)]
+    automation_context_methods: Vec<String>,
+    #[serde(default)]
     description: String,
     #[serde(default = "default_timeout")]
     timeout_seconds: u64,
@@ -203,7 +205,34 @@ fn copy_package(
     Ok(())
 }
 fn entry_info(entry: &Installed) -> Value {
-    json!({"id":entry.manifest.id,"name":entry.manifest.name,"version":entry.manifest.version,"description":entry.manifest.description,"enabled":entry.enabled,"compatible":entry.manifest.protocol_version==1,"methods":entry.manifest.methods,"allowed_requests":entry.manifest.allowed_requests})
+    json!({"id":entry.manifest.id,"name":entry.manifest.name,"version":entry.manifest.version,"description":entry.manifest.description,"enabled":entry.enabled,"generation":entry.generation,"compatible":entry.manifest.protocol_version==1,"methods":entry.manifest.methods,"allowed_requests":entry.manifest.allowed_requests})
+}
+
+fn sync_executor(client: &Client, entry: &Installed) -> Result<()> {
+    if client.existing_connection()?.is_none() {
+        return Ok(());
+    }
+    let response=client.request("automation.executor.changed",json!({"plugin_id":entry.manifest.id,"generation":entry.generation,"enabled":entry.enabled}),&uuid::Uuid::new_v4().to_string(),false,Duration::from_secs(10));
+    if response["ok"] != true {
+        return Err(format!(
+            "Could not update workflow executor authority: {}",
+            response["error"]["message"]
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn automation_executor(client: &Client, id: &str) -> Result<String> {
+    locked(client, |state, _| {
+        let entry = state
+            .get(id)
+            .ok_or("The workflow executor is not installed.")?;
+        if !entry.enabled {
+            return Err("The workflow executor is disabled.".into());
+        }
+        sync_executor(client, entry)?;
+        Ok(entry.generation.clone())
+    })
 }
 
 pub fn execute(client: &Client, command: &PluginCommand, request_id: &str) -> Value {
@@ -358,6 +387,7 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
             entry.config = Value::Object(settings);
             entry.enabled = true;
             entry.generation = uuid::Uuid::new_v4().to_string();
+            sync_executor(client, entry)?;
             Ok(entry_info(entry))
         }),
         PluginCommand::Disable { id } => locked(client, |state, _| {
@@ -366,15 +396,20 @@ fn execute_uncached(client: &Client, command: &PluginCommand, request_id: &str) 
                 .ok_or("PLUGIN_NOT_INSTALLED: The plugin is not installed.")?;
             entry.enabled = false;
             entry.generation = uuid::Uuid::new_v4().to_string();
+            sync_executor(client, entry)?;
             Ok(entry_info(entry))
         }),
         PluginCommand::Remove { id } => locked(client, |state, dir| {
             if !valid_id(id) {
                 return Err("Invalid plugin ID.".into());
             }
-            state
-                .remove(id)
+            let entry = state
+                .get_mut(id)
                 .ok_or("PLUGIN_NOT_INSTALLED: The plugin is not installed.")?;
+            entry.enabled = false;
+            entry.generation = uuid::Uuid::new_v4().to_string();
+            sync_executor(client, entry)?;
+            state.remove(id);
             let path = dir.join(id);
             if path.exists() {
                 fs::remove_dir_all(path).map_err(|e| e.to_string())?;
@@ -556,7 +591,13 @@ fn invoke_plugin(
     result
 }
 
-fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str) -> Value {
+pub(super) fn run(
+    client: &Client,
+    id: &str,
+    method: &str,
+    params: Value,
+    request_id: &str,
+) -> Value {
     if !params.is_object() {
         return failure(
             request_id,
@@ -636,6 +677,29 @@ fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str)
             let mut execution_params = params.clone();
             if entry
                 .manifest
+                .automation_context_methods
+                .iter()
+                .any(|m| m == method)
+            {
+                let context=client.call("automation.context",json!({"task_id":params["task_id"],"attempt_id":params["attempt_id"],"token":params["token"]}),&subrequest_id(request_id,"automation-context"));
+                if context["ok"] != true {
+                    return Err(
+                        "PLUGIN_CONTEXT_UNAVAILABLE: This workflow attempt is no longer active."
+                            .into(),
+                    );
+                }
+                if context["result"]["automation"]["configuration"]["plugin_id"] != id
+                    || context["result"]["automation"]["configuration"]["method"] != method
+                {
+                    return Err(
+                        "PLUGIN_CONTEXT_UNAVAILABLE: The workflow selected a different executor."
+                            .into(),
+                    );
+                }
+                execution_params["automation_context"] = context["result"].clone();
+            }
+            if entry
+                .manifest
                 .task_context_methods
                 .iter()
                 .any(|m| m == method)
@@ -668,6 +732,7 @@ fn run(client: &Client, id: &str, method: &str, params: Value, request_id: &str)
                 }
                 execution_params["task"] = current;
                 execution_params["task_runs"] = context["result"]["runs"].clone();
+                execution_params["task_automation"] = context["result"]["automation"].clone();
                 execution_params["agent_protocol"] = json!(crate::agent::PROTOCOL);
                 execution_params["board_connection"] = json!({
                     "executable": std::env::current_exe().map_err(|e| e.to_string())?,

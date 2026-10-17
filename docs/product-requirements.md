@@ -7,6 +7,7 @@ People and CLI-based agents share the same task state. The user sees current and
 | Requirement | Behavior |
 | --- | --- |
 | CLI integration | List, create, edit, assign, start, request review, and complete tasks. Return JSON results. |
+| Agent automation | Inherit project defaults on new tasks or explicitly arm a task. Configure status rules with agents, skills, prompts, and instructions. Run one stage or preflight, implementation, independent review, bounded rework, and release preparation. Keep stage results separate from final user approval. Persist attempts and recover without duplicate launches. Optional executors remain separately installed plugins. |
 | Mac widget | Show current work, upcoming work, and tasks needing user review. |
 | Desktop kanban | Open task cards in a standalone app, move them between columns, and filter by project. |
 | Subtasks | Create subtasks with individual status, assignee, completion criteria, and artifacts. Show the list and progress in the parent task. |
@@ -141,3 +142,7 @@ Include all new tables in backup, restore, JSON, and Markdown exports. Never reu
 ## Later scope
 
 Cross-device synchronization, team collaboration, a built-in agent runner, automatic long-term memory extraction, and a Rust port of amem are separate from the initial implementation. Validate core workflows first.
+
+## Reusable automation processes
+
+People can store process presets with ordered stages and per-stage agents, skills, prompts, and instructions. Built-in small, standard, and large processes provide starting points. Task creation and per-task configuration can select a preset, retain manual execution, or delegate process selection to an agent. Selection records a reason and respects configured allowed presets. Configured tasks retain a frozen process when the shared library changes. The process stage remains separate from kanban status, run state, and human completion approval.

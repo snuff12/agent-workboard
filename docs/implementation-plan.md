@@ -18,6 +18,7 @@ The first goal is shared tasks and subtasks across the CLI, Mac app, and native 
 | GitHub | Separate package; mocked provider and actual host/service tests, package verification, and live gh-mode reads on a public repository pass. Real-account writes and native UI interaction pending. |
 | Local distribution | App installation, CLI link, LaunchAgent takeover tested. Developer ID signing/notarization remain separate. |
 | Planning extensions | Dependencies, templates, review checklists, Inbox, saved views, and weekly planning implemented with service and Swift regressions. |
+| Agent automation | Fixed per-task development stages, Orca executor, review/rework limits, report/exit receipts, pause/recovery, and app controls implemented. Isolated real Orca terminals with synthetic agents and service/Swift/pixel checks verified; actual model calls and native button interaction remain separate. |
 
 Use [verification](verification.md) for precise commands, evidence, and limits. The stages below remain acceptance criteria rather than claims that all external validation is complete.
 
@@ -92,3 +93,17 @@ Porting Python amem to Rust is independent. Measure startup, search latency, ind
 | Memory save recovery | Identical requests reuse responses; uncertain results do not rerun. Manual inbox confirmation remains necessary. |
 | Obsidian vault | Add only for a concrete document-management need. |
 | Cross-device sync | Design separately after single-Mac core acceptance. |
+
+## Status automation follow-up
+
+Project-scoped defaults and per-card status rules are implemented. New tasks and subtasks inherit frozen enabled defaults; existing cards keep their own configuration. The native editor and CLI configure required skills, prompts, instructions, and agents per rule or development stage. Actual Codex and Claude smoke evidence, native status-menu/configuration evidence, and installed rollout details are recorded in [verification](verification.md). Custom graph editing, arbitrary executable actions, and substantive coding benchmarks remain separate work.
+
+## Reusable automation processes — implemented
+
+- Store reusable process definitions through the service, with small, standard, and large built-ins and editable custom stages.
+- Select a process during task creation or configuration, retain manual execution, and freeze the selected definition for each task.
+- Let an agent select from authorized presets with a reason, followed by separately confirmed report and process exit.
+- Expose library CRUD and inactive-task selection through the CLI and both agent kits.
+- Verify ordered execution, bounded rework, source preservation, revision/assignment guards, backup/restore, native library/card selection, and an actual Codex selection/execution smoke flow.
+
+The verified installed build is recorded in [verification](verification.md#reusable-process-presets-october-18).

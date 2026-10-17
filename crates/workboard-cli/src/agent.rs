@@ -12,7 +12,9 @@ use std::time::Duration;
 pub const PROTOCOL: &str = include_str!("../../../integrations/agents/protocol.md");
 
 /// Requests that act for an agent. The CLI adds the session's agent ID when none is given.
-pub const IDENTIFIED_METHODS: [&str; 16] = [
+pub const IDENTIFIED_METHODS: [&str; 18] = [
+    "task.create",
+    "template.apply",
     "task.claim",
     "task.start",
     "task.review",

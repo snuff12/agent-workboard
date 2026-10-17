@@ -1,6 +1,260 @@
 import SwiftUI
 import AppKit
 
+struct TaskAutomationSection: View {
+    @EnvironmentObject private var store: BoardStore
+    let detail: TaskDetail
+    @State private var configuring = false
+    @State private var resolving = false
+    @State private var disabling = false
+    private var automation: TaskAutomation? { detail.automation }
+    var body: some View {
+        DetailSection(title: "Automation", symbol: "gearshape.2") {
+            VStack(alignment: .leading, spacing: 10) {
+                if let automation {
+                    Text(automation.title).font(.callout.weight(.medium))
+                    if let name = automation.presetName {
+                        Text(name).font(.caption.weight(.medium))
+                        if let reason = automation.raw["process"]["selection_reason"].string { Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                        DisclosureGroup("Process stages") {
+                            ForEach(Array(automation.raw["process"]["preset"]["steps"].array.enumerated()), id: \.offset) { row in
+                                Text("\(row.offset + 1). \(row.element["title"].string ?? "Stage")").font(.caption)
+                            }
+                        }.font(.caption)
+                    }
+                    if let message = automation.raw["message"].string, !message.isEmpty { Text(message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                    HStack {
+                        if automation.state == "armed" { Button("Start") { action("start") }.disabled(detail.task.status.isClosed) }
+                        if automation.state == "running" { Button("Pause after stage") { action("pause") } }
+                        if ["paused", "blocked"].contains(automation.state) && automation.raw["limit_reached"].bool != true { Button("Resume") { action("resume") } }
+                        if ["armed", "waiting", "disabled", "completed", "canceled"].contains(automation.state) { Button("Configure…") { configuring = true }.disabled(automation.needsExitConfirmation || store.orcaPlugin == nil) }
+                        if !["disabled", "completed", "canceled"].contains(automation.state) { Button("Disable…") { disabling = true } }
+                    }.controlSize(.small).disabled(store.isMutating)
+                    if ["paused", "blocked", "disabled", "canceled"].contains(automation.state) && automation.needsExitConfirmation {
+                        Button("Verify agent exit…") { resolving = true }.controlSize(.small)
+                    }
+                    if let revision = automation.raw["inherited_revision"].int { Text("Inherited project defaults, version \(revision)").font(.caption).foregroundStyle(.secondary) }
+                    DisclosureGroup("Status rules (\(automation.raw["configuration"]["rules"].array.count))") {
+                        ForEach(Array(automation.raw["configuration"]["rules"].array.enumerated()), id: \.offset) { row in
+                            Text("\(WorkStatus(rawValue: row.element["status"].string ?? "")?.title ?? "Status") → \(row.element["action"].string == "development" ? "Development workflow" : TaskAutomation.stageTitle(row.element["stage"].string ?? ""))").font(.caption)
+                        }
+                    }
+                    if !automation.attempts.isEmpty {
+                        DisclosureGroup("Stage history (\(automation.attempts.count))") {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(Array(automation.attempts.enumerated()), id: \.offset) { row in
+                                    let attempt = row.element
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("\(row.offset + 1). \(attempt["settings"]["step_title"].string ?? TaskAutomation.stageTitle(attempt["stage"].string ?? "")) · \(attempt["state"].string ?? "")").fontWeight(.medium)
+                                        if !attempt["settings"]["skills"].array.isEmpty { Text("Skills: " + attempt["settings"]["skills"].array.compactMap(\.string).joined(separator: ", ")).textSelection(.enabled) }
+                                        if let prompt = attempt["settings"]["prompt"].string, !prompt.isEmpty { Text("Prompt: " + prompt).textSelection(.enabled) }
+                                        if let instructions = attempt["settings"]["instructions"].string, !instructions.isEmpty { Text("Instructions: " + instructions).textSelection(.enabled) }
+                                        if let summary = attempt["result"]["summary"].string { Text(summary).textSelection(.enabled) }
+                                        ForEach(Array(attempt["result"]["evidence"].array.enumerated()), id: \.offset) { evidence in Text(evidence.element.string ?? "").foregroundStyle(.secondary).textSelection(.enabled) }
+                                        if let terminal = attempt["receipt"]["terminal"]["handle"].string { Text("Orca terminal: \(terminal)").foregroundStyle(.secondary).textSelection(.enabled) }
+                                        if let version = attempt["result"]["source_version"].string { Text(version).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled) }
+                                    }
+                                }
+                            }.font(.caption).padding(.top, 8)
+                        }.font(.caption)
+                    }
+                } else {
+                    Text("Choose a process preset for this task. Final approval stays with you.").font(.caption).foregroundStyle(.secondary)
+                    Button("Configure automation…") { configuring = true }.controlSize(.small).disabled(detail.task.status.isClosed)
+                }
+            }
+        }
+        .sheet(isPresented: $configuring) { AutomationConfigurationView(detail: detail) }
+        .sheet(isPresented: $resolving) { AutomationExitConfirmationView(detail: detail) }
+        .confirmationDialog("Disable this workflow?", isPresented: $disabling) {
+            Button("Disable automation", role: .destructive) { action("disable") }
+        } message: { Text("No further stage will start and late results will be refused. An active agent may continue; inspect it in Orca before restarting.") }
+    }
+    private func action(_ name: String) {
+        let context = store.workflowContext
+        var fields: [String: JSONValue] = [:]
+        if let automation { fields["expected_automation_revision"] = .number(Double(automation.revision)) }
+        Task { _ = await store.taskWorkflowMutation("automation.\(name)", task: detail.task, fields: fields, context: context) }
+    }
+}
+
+struct AutomationStageDraft: Identifiable {
+    var id: String
+    var agent = ""
+    var skills = ""
+    var prompt = ""
+    var instructions = ""
+    init(id: String, value: JSONValue = .null) {
+        self.id = id; agent = value["agent"].string ?? ""; skills = value["skills"].array.compactMap(\.string).joined(separator: "\n")
+        prompt = value["prompt"].string ?? ""; instructions = value["instructions"].string ?? ""
+    }
+    var json: JSONValue { .object(["agent": .string(agent), "skills": .array(skills.split(separator: "\n").map { .string(String($0).trimmingCharacters(in: .whitespaces)) }.filter { $0.string?.isEmpty == false }), "prompt": .string(prompt), "instructions": .string(instructions)]) }
+}
+struct AutomationRuleDraft: Identifiable {
+    var id: String
+    var status: String
+    var action: String
+    var stage: String
+    var settings: AutomationStageDraft
+    init(_ value: JSONValue) {
+        id = value["id"].string ?? UUID().uuidString; status = value["status"].string ?? "in_progress"
+        action = value["action"].string ?? "development"; stage = value["stage"].string ?? "preflight"
+        settings = AutomationStageDraft(id: id, value: value)
+    }
+    var json: JSONValue { var fields = settings.json.object; fields["id"] = .string(id); fields["status"] = .string(status); fields["action"] = .string(action); fields["stage"] = .string(stage); return .object(fields) }
+}
+struct AutomationStageFields: View {
+    @Binding var draft: AutomationStageDraft
+    var body: some View {
+        Picker("Agent", selection: $draft.agent) { Text("Use workflow agent").tag(""); Text("Codex").tag("codex"); Text("Claude").tag("claude") }
+        TextField("Required skills: one name or SKILL.md path per line", text: $draft.skills, axis: .vertical).lineLimit(2...5)
+        TextField("Prompt", text: $draft.prompt, axis: .vertical).lineLimit(3...8)
+        TextField("Instructions", text: $draft.instructions, axis: .vertical).lineLimit(3...8)
+    }
+}
+struct AutomationConfigurationView: View {
+    @EnvironmentObject private var store: BoardStore
+    @EnvironmentObject private var appearance: AppearanceSettings
+    @Environment(\.dismiss) private var dismiss
+    var detail: TaskDetail? = nil
+    var project: BoardProject? = nil
+    @StateObject private var plugins = PluginStore()
+    @State private var worktrees: [JSONValue] = []
+    @State private var worktree = ""
+    @State private var agent = "codex"
+    @State private var reviewer = "codex"
+    @State private var reworks = 2
+    @State private var minutes = 30
+    @State private var instructions = ""
+    @State private var enabled = true
+    @State private var processPreset = "standard"
+    @State private var allowedPresets: [String] = []
+    @State private var showingPresets = false
+    @State private var defaultsRevision = 0
+    @State private var rules: [AutomationRuleDraft] = []
+    @State private var stages: [AutomationStageDraft] = []
+    @State private var context: WorkflowEditContext?
+    @State private var loaded = false
+    private let stageIDs = ["preflight", "plan", "work", "verify", "review", "rework", "release"]
+    private var duplicates: Bool { Set(rules.map(\.status)).count != rules.count }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(project == nil ? "Task automation" : "Project automation defaults").font(.title3.weight(.semibold))
+            Text(project == nil ? "A matching status change starts its rule. Each stage uses a fresh agent session." : "Apply this configuration to new tasks and subtasks. Existing tasks keep their own configuration.").font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                Form {
+                    if project != nil { Toggle("Apply defaults to new tasks", isOn: $enabled) }
+                    Section("Process") {
+                        ProcessPresetPicker(selection: $processPreset, presets: store.processPresets, includeDefault: false)
+                        if processPreset == "auto" {
+                            Text("The agent chooses among these presets and records a reason. Leave all unchecked to allow every preset.").font(.caption).foregroundStyle(.secondary)
+                            ForEach(Array(store.processPresets.enumerated()), id: \.offset) { row in
+                                let preset = row.element
+                                if let id = preset["id"].string {
+                                    Toggle(preset["name"].string ?? id, isOn: Binding(get: { allowedPresets.contains(id) }, set: { value in if value { allowedPresets.append(id) } else { allowedPresets.removeAll { $0 == id } } }))
+                                }
+                            }
+                        }
+                        Button("Manage process presets…") { showingPresets = true }
+                    }
+                    Picker("Worktree", selection: $worktree) {
+                        Text("Choose a worktree").tag("")
+                        if !worktree.isEmpty && !worktrees.contains(where: { $0["id"].string == worktree }) { Text(worktree).tag(worktree) }
+                        ForEach(Array(worktrees.enumerated()), id: \.offset) { row in Text(row.element["title"].string ?? row.element["path"].string ?? "Worktree").tag(row.element["id"].string ?? "") }
+                    }
+                    Picker("Implementation agent", selection: $agent) { Text("Codex").tag("codex"); Text("Claude").tag("claude") }
+                    Picker("Review agent", selection: $reviewer) { Text("Codex").tag("codex"); Text("Claude").tag("claude") }
+                    Stepper("Maximum rework cycles: \(reworks)", value: $reworks, in: 0...10)
+                    Stepper("Stage deadline: \(minutes) minutes", value: $minutes, in: 1...1440)
+                    TextField("Workflow instructions", text: $instructions, axis: .vertical).lineLimit(2...5)
+                    Section("Status rules") {
+                        Text("One rule per status. A single stage preserves the card's column and waits for the next status change.").font(.caption).foregroundStyle(.secondary)
+                        ForEach($rules) { $rule in
+                            DisclosureGroup("\(WorkStatus(rawValue: rule.status)?.title ?? rule.status) → \(rule.action == "development" ? "Development workflow" : TaskAutomation.stageTitle(rule.stage))") {
+                                Picker("When moved to", selection: $rule.status) { ForEach(WorkStatus.allCases) { Text($0.title).tag($0.rawValue) } }
+                                Picker("Run", selection: $rule.action) { Text("Development workflow").tag("development"); Text("Single stage").tag("stage") }
+                                if rule.action == "stage" { stagePicker(selection: $rule.stage) }
+                                if rule.action == "development" && rule.status != "in_progress" { Text("Development workflows require In Progress.").foregroundStyle(.red).font(.caption) }
+                                AutomationStageFields(draft: $rule.settings)
+                                Button("Remove rule", role: .destructive) { rules.removeAll { $0.id == rule.id } }
+                            }
+                        }
+                        Button("Add status rule") {
+                            let status = WorkStatus.allCases.first { candidate in !rules.contains { $0.status == candidate.rawValue } }?.rawValue ?? "review"
+                            rules.append(AutomationRuleDraft(.object(["status": .string(status), "action": .string("stage"), "stage": .string(status == "review" ? "review" : "preflight")])))
+                        }.disabled(rules.count >= 6)
+                        if duplicates { Text("Choose a different status for each rule.").font(.caption).foregroundStyle(.red) }
+                    }
+                    Section("Development stage overrides") {
+                        Text("Optional settings override the rule for this stage. Leave empty to use the rule settings.").font(.caption).foregroundStyle(.secondary)
+                        ForEach($stages) { $stage in DisclosureGroup(TaskAutomation.stageTitle(stage.id)) { AutomationStageFields(draft: $stage) } }
+                    }
+                }.formStyle(.grouped)
+            }
+            if let error = plugins.error { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            HStack { Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Spacer(); if !loaded { ProgressView().controlSize(.small) }; Button(project == nil ? "Arm automation" : "Save defaults") { Task { await save() } }.disabled(!loaded || worktree.isEmpty || duplicates || rules.contains { $0.action == "development" && $0.status != "in_progress" } || store.isMutating || store.orcaPlugin?.methods.contains("automation.start") != true).accessibilityIdentifier("automation-save") }
+        }.padding(24).frame(width: 650, height: 720).task { await load() }.onChange(of: store.workflowGeneration) { _, _ in dismiss() }.sheet(isPresented: $showingPresets) { ProcessPresetLibraryView() }
+    }
+    private func stagePicker(selection: Binding<String>) -> some View { Picker("Stage", selection: selection) { ForEach(stageIDs, id: \.self) { Text(TaskAutomation.stageTitle($0)).tag($0) } } }
+    private func load() async {
+        context = store.workflowContext
+        var config = detail?.automation?.raw["configuration"] ?? .null
+        if let project, let result = await plugins.call("automation.defaults.get", params: ["project_id": .string(project.id)], configuration: appearance.connection) {
+            config = result["defaults"]["configuration"]; defaultsRevision = result["defaults"]["revision"].int ?? 0; enabled = result["defaults"]["enabled"].bool ?? true
+        }
+        worktree = config["resource_key"].string ?? TaskArtifact.orcaWorktrees(detail?.artifacts ?? []).first?.locator ?? ""
+        processPreset = config == .null ? "standard" : (config["process_preset"].string ?? "")
+        allowedPresets = config["allowed_presets"].array.compactMap(\.string)
+        let params = config["params"]; agent = params["agent"].string ?? "codex"; reviewer = params["reviewer"].string ?? agent
+        reworks = config["max_reworks"].int ?? 2; minutes = (config["timeout_seconds"].int ?? 1800) / 60; instructions = params["instructions"].string ?? ""
+        let defaultRule: JSONValue = .object(["id": .string("start-development"), "status": .string("in_progress"), "action": .string("development")])
+        rules = (config["rules"] == .null ? [defaultRule] : config["rules"].array).map(AutomationRuleDraft.init)
+        stages = stageIDs.map { AutomationStageDraft(id: $0, value: config["stage_settings"][$0]) }
+        if let plugin = store.orcaPlugin, let result = await plugins.run(plugin, method: "worktrees.list", params: ["limit": .number(100)], configuration: appearance.connection) { worktrees = result["worktrees"].array }
+        loaded = true
+    }
+    private func save() async {
+        guard let context, store.isCurrentWorkflow(context) else { return }
+        var overrides: [String: JSONValue] = [:]
+        for stage in stages {
+            var fields: [String: JSONValue] = [:]
+            for (key, value) in stage.json.object where value != .string("") && value != .array([]) { fields[key] = value }
+            if !fields.isEmpty { overrides[stage.id] = .object(fields) }
+        }
+        let config: JSONValue = .object(["plugin_id": .string("orca"), "method": .string("automation.start"), "resource_key": .string(worktree), "params": .object(["worktree_id": .string(worktree), "agent": .string(agent), "reviewer": .string(reviewer), "instructions": .string(instructions)]), "max_reworks": .number(Double(reworks)), "timeout_seconds": .number(Double(minutes * 60)), "rules": .array(rules.map(\.json)), "stage_settings": .object(overrides), "process_preset": processPreset.isEmpty ? .null : .string(processPreset), "allowed_presets": .array(allowedPresets.map(JSONValue.string))])
+        if let project {
+            if await store.workflowMutation("automation.defaults.set", params: ["project_id": .string(project.id), "configuration": config, "enabled": .bool(enabled), "expected_defaults_revision": .number(Double(defaultsRevision))], context: context) != nil { dismiss() }
+        } else if let detail {
+            var fields: [String: JSONValue] = ["configuration": config]
+            if let automation = detail.automation { fields["expected_automation_revision"] = .number(Double(automation.revision)) }
+            if await store.taskWorkflowMutation("automation.configure", task: detail.task, fields: fields, context: context) { dismiss() }
+        }
+    }
+}
+
+private struct AutomationExitConfirmationView: View {
+    @EnvironmentObject private var store: BoardStore
+    @Environment(\.dismiss) private var dismiss
+    let detail: TaskDetail
+    @State private var confirmed = false
+    @State private var summary = ""
+    @State private var context: WorkflowEditContext?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Verify agent exit").font(.title3.weight(.semibold))
+            Text("Inspect the stage's Orca terminal and stop any remaining agent before confirming. This records your observation and allows an explicit retry; it does not stop a process.").font(.callout)
+            Toggle("I verified that the previous agent has stopped", isOn: $confirmed)
+            TextField("What did you check?", text: $summary, axis: .vertical).lineLimit(2...4)
+            HStack { Button("Cancel") { dismiss() }; Spacer(); Button("Record confirmation") { Task { await save() } }.disabled(!confirmed || summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.isMutating) }
+        }.padding(24).frame(width: 480).onAppear { context = store.workflowContext }.onChange(of: store.workflowGeneration) { _, _ in dismiss() }
+    }
+    private func save() async {
+        guard let context else { return }
+        let fields: [String: JSONValue] = ["confirm_stopped": .bool(confirmed), "summary": .string(summary), "expected_automation_revision": .number(Double(detail.automation?.revision ?? 0))]
+        if await store.taskWorkflowMutation("automation.resolve", task: detail.task, fields: fields, context: context) { dismiss() }
+    }
+}
+
 extension BoardStore {
     @discardableResult func taskWorkflowMutation(_ method: String, task: BoardTask, fields: [String: JSONValue] = [:], context: WorkflowEditContext? = nil) async -> Bool {
         var params = fields
@@ -142,11 +396,15 @@ struct TaskWorkflowSections: View {
         if task.status == .review || !decisions.isEmpty {
             DetailSection(title: "Review", symbol: "checkmark.bubble") {
                 if task.status == .review {
+                    if let automation = store.automations[task.id], automation.raw["single_stage"].bool != true, !["awaiting_approval", "disabled", "completed", "canceled"].contains(automation.state) {
+                        Text("Final approval becomes available after automation finishes release preparation.").font(.caption).foregroundStyle(BoardInk.secondary(colorScheme))
+                    } else {
                     HStack {
                         Button("Approve") { decision = ReviewSelection(task: task, value: "approve", context: context ?? store.workflowContext) }.disabled(!task.incompleteRequirements.isEmpty)
                         Button("Request changes") { decision = ReviewSelection(task: task, value: "request_changes", context: context ?? store.workflowContext) }
                         Menu { Button("Reject…") { decision = ReviewSelection(task: task, value: "reject", context: context ?? store.workflowContext) } } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 20)
                     }.buttonStyle(BoardSecondaryButtonStyle()).disabled(store.isMutating)
+                    }
                 }
                 ForEach(decisions.reversed()) { item in
                     VStack(alignment: .leading, spacing: 5) {

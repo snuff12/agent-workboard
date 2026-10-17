@@ -12,8 +12,9 @@ use std::{
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 6;
+pub const DATABASE_VERSION: u32 = 7;
 
+mod automation;
 mod trash;
 mod workflow;
 pub use workflow::ChecklistItem;
@@ -481,7 +482,18 @@ impl Board {
             return read_method(&self.conn, &r.method, &r.params);
         }
         let tx = self.conn.transaction()?;
-        let value = mutate(&tx, r, &self.data_dir)?;
+        automation::before_mutation(&tx, r)?;
+        let automation_statuses = if r.method.starts_with("automation.") {
+            std::collections::HashMap::new()
+        } else {
+            automation::rules_statuses(&tx)?
+        };
+        let mut value = mutate(&tx, r, &self.data_dir)?;
+        automation::after_mutation(&tx, r, &automation_statuses)?;
+        if let Some(task_id) = value["task"]["id"].as_str().map(str::to_string) {
+            value["task"] = json!(get_task(&tx, &task_id)?);
+            value["event_sequence"] = json!(sequence(&tx)?);
+        }
         remember(&tx, r, &fingerprint, &value)?;
         tx.commit()?;
         // A failed derived snapshot never rolls back a committed task or reports a false mutation failure.
@@ -713,7 +725,8 @@ impl Board {
             // Import only our known model into the current schema. Schema, FTS triggers and the live
             // request ledger remain controlled by this service. The restore and its retry result commit together.
             let tx = self.conn.transaction()?;
-            tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
+            automation::before_restore(&tx)?;
+            tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM automations; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
             for (table,columns) in [
                 ("projects","id,name,directory,created_at"),
                 ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by"),
@@ -725,6 +738,7 @@ impl Board {
                 ("inbox","id,title,source,note,status,task_id,revision,created_at,updated_at"),
                 ("templates","id,name,definition,builtin,revision,created_at,updated_at"),
                 ("saved_views","id,name,filters,layout,revision,created_at,updated_at"),
+                ("automations","task_id,data"),
                 ("events","sequence,request_id,task_id,kind,actor,created_at,data"),
             ] {
                 let order=if ["runs","checklist_items","review_decisions"].contains(&table) {" ORDER BY rowid"}else{""};
@@ -756,6 +770,8 @@ impl Board {
                 )?;
             }
             workflow::restore_revisions(&tx)?;
+            automation::restore_defaults(&tx)?;
+            automation::after_restore(&tx)?;
             let updated = tx.execute(
                 "UPDATE sqlite_sequence SET seq=max(seq,?1) WHERE name='events'",
                 [previous_sequence],
@@ -782,7 +798,7 @@ impl Board {
         let artifacts = all_artifacts(&self.conn, None)?;
         let runs = all_runs(&self.conn, None)?;
         let events = events(&self.conn, 0)?;
-        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"trash":state["trash"],"artifacts":artifacts,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
+        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"trash":state["trash"],"automations":state["automations"],"automation_defaults":state["automation_defaults"],"process_presets":state["process_presets"],"artifacts":artifacts,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
         let format = optional(p, "format")?.unwrap_or_else(|| "json".into());
         let content = match format.as_str() {
             "json" => serde_json::to_string_pretty(&document)?,
@@ -887,6 +903,9 @@ COMMIT;
     }
     if version < 6 {
         add_workflow_states_and_trash(conn)?;
+    }
+    if version < 7 {
+        automation::migrate(conn)?;
     }
     Ok(())
 }
@@ -1197,7 +1216,7 @@ fn events(c: &Connection, after: i64) -> Result<Vec<Event>, ApiError> {
 }
 fn snapshot(c: &Connection) -> Result<Value, ApiError> {
     Ok(
-        json!({"projects":projects(c)?,"tasks":list_tasks(c,&json!({}))?,"trash":trash::items(c)?,"templates":workflow::templates(c)?,"views":workflow::views(c)?,"inbox":workflow::inbox(c,&json!({}))?,"event_sequence":sequence(c)?}),
+        json!({"projects":projects(c)?,"tasks":list_tasks(c,&json!({}))?,"automations":automation::list(c)?,"automation_defaults":automation::project_defaults(c)?,"process_presets":automation::process_presets(c)?,"trash":trash::items(c)?,"templates":workflow::templates(c)?,"views":workflow::views(c)?,"inbox":workflow::inbox(c,&json!({}))?,"event_sequence":sequence(c)?}),
     )
 }
 fn task_detail(c: &Connection, id: &str) -> Result<Value, ApiError> {
@@ -1206,10 +1225,13 @@ fn task_detail(c: &Connection, id: &str) -> Result<Value, ApiError> {
     let completed = children.iter().filter(|x| x.status == "done").count();
     let canceled = children.iter().filter(|x| x.status == "canceled").count();
     Ok(
-        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"canceled_child_count":canceled,"artifacts":all_artifacts(c,Some(id))?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?}),
+        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"canceled_child_count":canceled,"artifacts":all_artifacts(c,Some(id))?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?,"automation":automation::get_public(c,id)?}),
     )
 }
 fn read_method(c: &Connection, method: &str, p: &Value) -> Result<Value, ApiError> {
+    if let Some(value) = automation::read(c, method, p)? {
+        return Ok(value);
+    }
     match method {
         "template.list" => Ok(json!({"templates":workflow::templates(c)?})),
         "trash.list" => Ok(json!({"items":trash::items(c)?})),
@@ -1250,6 +1272,9 @@ fn read_method(c: &Connection, method: &str, p: &Value) -> Result<Value, ApiErro
     }
 }
 fn is_mutation(method: &str) -> bool {
+    if automation::is_mutation(method) {
+        return true;
+    }
     matches!(
         method,
         "template.save"
@@ -1401,6 +1426,9 @@ fn result_task(c: &Connection, t: &Task, seq: i64) -> Result<Value, ApiError> {
 }
 fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, ApiError> {
     let p = &r.params;
+    if let Some(result) = automation::mutate(c, r)? {
+        return Ok(result);
+    }
     if let Some(result) = workflow::mutate(c, r)? {
         return Ok(result);
     }

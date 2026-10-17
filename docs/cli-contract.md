@@ -72,6 +72,8 @@ Plugins are restricted to approved task reads/mutations. Deletion, the trash, re
 
 ## Dependencies and reviews
 
+Opt-in development workflows use the `automation` command group and `automation.*` requests. See [agent automation](automation.md) for implemented commands, revision checks, scoped stage tokens, and separate report/exit receipts. Automatic stage review results do not invoke `task.review.decide`; that request still represents final task review.
+
 IDs of prerequisites that are neither Done nor Canceled appear in `blocked_by`. A task is `ready` when its status is Todo and it has neither open prerequisites nor an explicit blocking reason. Reject dependency cycles. Check prerequisites for start/completion, including `task update --status`.
 
 ```sh
@@ -254,3 +256,25 @@ The default timeout is 30 seconds; interactive OAuth may declare `timeout_second
 On SIGINT/SIGTERM, terminate the provider's process-group descendants and stop new core mutations. This does not roll back external writes; retain pending/prepared journals. SIGKILL, power loss, and children deliberately escaping the process group are outside this signal-cleanup guarantee.
 
 The initial distribution supports local packages. A public registry, automatic updates, and OS sandboxing of third-party code are later scope.
+
+### Project automation defaults and status rules
+
+`automation.defaults.get` reads a project's defaults. `automation.defaults.set` requires `project_id`, `configuration`, `enabled`, and `expected_defaults_revision` (zero for a new definition). New tasks and subtasks inherit enabled defaults without launching. Snapshots and JSON export include `automation_defaults`. Per-card overrides preserve historical attempts.
+
+Configurations accept `rules` (one per status, up to six) and `stage_settings`. Rules use `id`, `status`, `action` (`development` or `stage`), `stage`, `agent`, `skills`, `prompt`, and `instructions`. Development rules require In Progress. Single-stage rules preserve the column and return to `waiting`. Internal workflow projections do not recursively trigger rules. Each attempt freezes its settings. See [automation](automation.md).
+
+`automation report --report-file PATH` or `WORKBOARD_AUTOMATION_REPORT_FILE` writes a new mode-0600 handoff file without connecting to the service or storing its token. Executors use `automation submit-report PATH` with the authorized attempt environment before settling the actual process exit. The service still checks tokens, executor generation, revisions, source versions, and stage deadlines.
+
+Task creation and template application accept `automation_mode`: `inherit` (default), `automatic`, or `manual`. Manual creation skips defaults for every task created by that request. Explicit automatic creation uses the saved project configuration even when inheritance is disabled; without saved configuration the service rejects and rolls back the entire creation. Invalid modes also roll back. The CLI exposes this as `task add --automation` and `template apply --automation`.
+
+## Process preset requests
+
+The service exposes `automation.presets.list`, `automation.presets.get` (`preset_id`), `automation.presets.save` (`preset`, `expected_preset_revision`), and `automation.presets.delete` (`preset_id`, `expected_preset_revision`). Built-ins cannot be edited. Library mutations are transactional and retry-safe. Preset revisions never repeat after deletion/recreation or restore.
+
+`automation.preset.apply` accepts `task_id`, `expected_revision`, `expected_automation_revision`, `preset_id`, and a nonempty `reason`. Agent callers may select only for unassigned or self-assigned inactive tasks. Selection saves a frozen definition and does not start execution. A process already running or awaiting approval cannot be replaced.
+
+Task creation and template application accept `process_preset` (a saved ID or `auto`) and optional `preset_reason`. An explicit selection implies automatic mode and requires project executor defaults. Combining it with manual mode is invalid. Configurations accept optional `process_preset` and `allowed_presets`; omitted selections preserve legacy workflows.
+
+In a `select` stage, `automation.report` requires an authorized `preset_id` and nonempty `selection_reason` for `pass`. A blocked report need not select. The executor handoff preserves these fields. Process exit remains a separate receipt. The task workflow's public `process` includes its frozen selected definition, candidate definitions, cursor, selector, and reason. Snapshot and JSON export include the `process_presets` library. See [automation](automation.md) for stage semantics and CLI commands.
+
+Automation control requests against an existing workflow require both `expected_revision` and `expected_automation_revision`. The CLI includes its session agent ID for task controls, preset selection, and task/template creation; the service validates assignment for controls. Backup restore rejects unresolved agent processes before replacing any automation state. Workflow revisions use a live monotonic watermark, including across repeated restores.

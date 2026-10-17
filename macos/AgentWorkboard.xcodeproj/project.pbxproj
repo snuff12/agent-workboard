@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00CB11D83E00053405F68F48 /* ProcessPresetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */; };
 		0CDD513B0C90C5E6F57AB4C2 /* GoogleWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */; };
 		0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */; };
 		18805D06D877A57D11F744ED /* WorkflowViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EA76B2069AE6B8E8312C19 /* WorkflowViews.swift */; };
@@ -66,6 +67,7 @@
 
 /* Begin PBXFileReference section */
 		0171C8F0614A68C02905CF43 /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
+		0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessPresetViews.swift; sourceTree = "<group>"; };
 		125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
 		1264FA2B4DE7D951AD317DE5 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		19655479674A5A3A9ECC1781 /* LinearView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinearView.swift; sourceTree = "<group>"; };
@@ -158,6 +160,7 @@
 				19655479674A5A3A9ECC1781 /* LinearView.swift */,
 				A40B26BEED20581CED11E4C4 /* Models.swift */,
 				64EC551A72385D030AC1F5DD /* PluginViews.swift */,
+				0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */,
 				5A880F06D49FE999CED11D18 /* QuickCapture.swift */,
 				540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */,
 				5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */,
@@ -350,6 +353,7 @@
 				3413B5E6FFCEB1B5BBE19290 /* LinearView.swift in Sources */,
 				F075C2F56334018CB932EC4C /* Models.swift in Sources */,
 				B157690AA518A29B9D00D36B /* PluginViews.swift in Sources */,
+				00CB11D83E00053405F68F48 /* ProcessPresetViews.swift in Sources */,
 				C38163687B4EF789D9F50A69 /* QuickCapture.swift in Sources */,
 				0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */,
 				215B487D4151F345AE689BCF /* Transport.swift in Sources */,

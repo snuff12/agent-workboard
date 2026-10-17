@@ -551,7 +551,7 @@ fn invalid_calendar_dates_ranges_and_timezones_do_not_create_tasks() {
 }
 fn downgrade_to_v1(path: &Path) {
     let connection = Connection::open(path).unwrap();
-    connection.execute_batch("DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; ALTER TABLE tasks DROP COLUMN time_zone; ALTER TABLE tasks DROP COLUMN scheduled_end; ALTER TABLE tasks DROP COLUMN scheduled_start; ALTER TABLE tasks DROP COLUMN due_at; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS task_revisions; PRAGMA user_version=1;").unwrap();
+    connection.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; ALTER TABLE tasks DROP COLUMN time_zone; ALTER TABLE tasks DROP COLUMN scheduled_end; ALTER TABLE tasks DROP COLUMN scheduled_start; ALTER TABLE tasks DROP COLUMN due_at; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS task_revisions; PRAGMA user_version=1;").unwrap();
 }
 #[test]
 fn schema_v1_migration_preserves_existing_tasks_and_adds_calendar_defaults() {
@@ -750,7 +750,7 @@ fn schema_v2_migration_preserves_schedules_and_adds_widget_settings() {
     );
     drop(b);
     let raw = Connection::open(dir.path().join("workboard.sqlite3")).unwrap();
-    raw.execute_batch("DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE settings; DROP TABLE task_revisions; PRAGMA user_version=2")
+    raw.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE settings; DROP TABLE task_revisions; PRAGMA user_version=2")
         .unwrap();
     drop(raw);
     let mut b = Board::open(dir.path()).unwrap();
@@ -1035,7 +1035,7 @@ fn schema_v3_migration_recovers_absent_task_watermark_from_retry_receipts() {
     drop(b);
     let raw = Connection::open(dir.path().join("workboard.sqlite3")).unwrap();
     raw.execute("DELETE FROM tasks WHERE id=?1", [&t]).unwrap();
-    raw.execute_batch("DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE task_revisions; PRAGMA user_version=3")
+    raw.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE task_revisions; PRAGMA user_version=3")
         .unwrap();
     drop(raw);
     let mut b = Board::open(dir.path()).unwrap();

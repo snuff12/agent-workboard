@@ -193,6 +193,7 @@ struct TaskDetail: Sendable {
     let runs: [TaskRun]
     let events: [JSONValue]
     let reviewDecisions: [ReviewDecision]
+    let automation: TaskAutomation?
     init?(_ json: JSONValue, events: [JSONValue]? = nil) {
         guard let task = BoardTask(json["task"]) else { return nil }
         self.task = task; children = json["children"].array.compactMap(BoardTask.init)
@@ -200,6 +201,47 @@ struct TaskDetail: Sendable {
         runs = json["runs"].array.enumerated().map { TaskRun($0.element, index: $0.offset) }
         self.events = events ?? (json["events"].array.isEmpty ? json["history"].array : json["events"].array)
         reviewDecisions = json["review_decisions"].array.compactMap(ReviewDecision.init)
+        automation = TaskAutomation(json["automation"])
+    }
+}
+
+struct TaskAutomation: Sendable {
+    let taskID: String
+    let raw: JSONValue
+    init?(_ json: JSONValue) {
+        guard let id = json["task_id"].string else { return nil }
+        taskID = id; raw = json
+    }
+    var state: String { raw["state"].string ?? "" }
+    var stage: String { raw["stage"].string ?? "" }
+    var revision: Int { raw["revision"].int ?? 0 }
+    var attempts: [JSONValue] { raw["attempts"].array }
+    var needsExitConfirmation: Bool { attempts.contains { $0["worker_exited"].bool == false && $0["state"].string != "queued" } }
+    var title: String {
+        switch state {
+        case "armed": "Ready to start"
+        case "waiting": "Waiting for status change"
+        case "paused": "Paused"
+        case "blocked": "Needs attention"
+        case "awaiting_approval": "Ready for final approval"
+        case "completed": "Approved"
+        case "disabled": "Disabled"
+        case "canceled": "Canceled"
+        default: progressTitle
+        }
+    }
+    var presetName: String? { raw["process"]["preset"]["name"].string }
+    var progressTitle: String {
+        if raw["single_stage"].bool == true { return Self.stageTitle(stage) }
+        if stage == "select" { return "Choose process preset" }
+        let process = raw["process"], steps = process["preset"]["steps"].array
+        let index = process["cursor"].int ?? 0
+        if stage == "rework" && process["rework_resume"].int != nil { return "Rework · " + (presetName ?? "Process") }
+        guard index < steps.count else { return Self.stageTitle(stage) }
+        return "\(index + 1)/\(steps.count) · \(steps[index]["title"].string ?? Self.stageTitle(stage))"
+    }
+    static func stageTitle(_ value: String) -> String {
+        switch value { case "select": "Choose process preset"; case "plan": "Plan"; case "verify": "Verification"; case "preflight": "Preflight"; case "work": "Implementation"; case "review": "Review"; case "rework": "Rework"; case "release": "Release preparation"; default: value }
     }
 }
 
@@ -229,6 +271,12 @@ struct UndoDeletion: Equatable {
     let taskID: String
 }
 
+enum TaskAutomationMode: String, CaseIterable, Identifiable {
+    case inherit, automatic, manual
+    var id: String { rawValue }
+    var title: String { switch self { case .inherit: "Project default"; case .automatic: "Use automation"; case .manual: "Manual work" } }
+}
+
 struct TaskDraft: Identifiable {
     let id = UUID()
     var projectID: String
@@ -240,6 +288,8 @@ struct TaskDraft: Identifiable {
     var blockedReason = ""
     var priority = 1
     var status = WorkStatus.todo
+    var automationMode = TaskAutomationMode.inherit
+    var processPreset = ""
     var hasDueDate = false
     var dueDate = Date()
     var dueIncludesTime = false

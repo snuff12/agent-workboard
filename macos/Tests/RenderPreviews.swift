@@ -8,7 +8,7 @@ import SwiftUI
         app.setActivationPolicy(.accessory)
         let environment = ProcessInfo.processInfo.environment
         let sourceDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let output = sourceDirectory.appendingPathComponent(".build/previews")
+        let output = environment["WORKBOARD_PREVIEW_OUTPUT"].map { URL(fileURLWithPath: $0) } ?? sourceDirectory.appendingPathComponent(".build/previews")
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let suite = "workboard-preview-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -22,6 +22,40 @@ import SwiftUI
         guard store.connectionError == nil else { throw WorkboardError(message: store.connectionError ?? "Cannot load actual board") }
         store.selectedProjectID = store.projects.first(where: { $0.directory == FileManager.default.currentDirectoryPath })?.id ?? store.projects.first?.id
         if let parent = store.tasks.first(where: { $0.parentID == nil }) { await store.openTask(parent.id) }
+        if environment["WORKBOARD_PREVIEW_PRESETS_ONLY"] == "1", let project = store.projects.first {
+            for mode in [AppearanceMode.light, .dark] {
+                let scheme: ColorScheme = mode == .dark ? .dark : .light
+                try capture(ProcessPresetLibraryView().environmentObject(store).environmentObject(appearance).environment(\.colorScheme, scheme), size: NSSize(width: 760, height: 600), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("preset-library-\(mode.rawValue).png"))
+                var preset = ProcessPresetDraft(store.processPresets.last ?? .null, duplicate: true); preset.name = "Feature with verification"; preset.whenToUse = "Features that need an explicit plan and independent verification."
+                try capture(ProcessPresetEditorView(draft: preset).environmentObject(store).environmentObject(appearance).environment(\.colorScheme, scheme), size: NSSize(width: 680, height: 740), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("preset-editor-\(mode.rawValue).png"))
+                var draft = TaskDraft(projectID: project.id); draft.title = "A task with agent-selected stages"; draft.automationMode = .automatic; draft.processPreset = "auto"
+                try capture(TaskEditorView(draft: draft).environmentObject(store).environmentObject(appearance).environment(\.colorScheme, scheme), size: NSSize(width: 560, height: 730), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("preset-creation-\(mode.rawValue).png"))
+            }
+            print("Process preset pixel QA from the actual isolated service: \(output.path)")
+            app.terminate(nil); return
+        }
+        if environment["WORKBOARD_PREVIEW_CREATION_ONLY"] == "1", let project = store.projects.first {
+            for mode in TaskAutomationMode.allCases {
+                var draft = TaskDraft(projectID: project.id); draft.title = "A task with optional automation"; draft.automationMode = mode
+                for appearanceMode in [AppearanceMode.light, .dark] {
+                    let scheme: ColorScheme = appearanceMode == .dark ? .dark : .light
+                    try capture(TaskEditorView(draft: draft).environmentObject(appearance).environmentObject(store).environment(\.colorScheme, scheme), size: NSSize(width: 560, height: 730), appearance: appearanceMode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("creation-\(mode.rawValue)-\(appearanceMode.rawValue).png"))
+                }
+            }
+            print("Task creation pixel previews from the actual isolated service: \(output.path)")
+            app.terminate(nil)
+            return
+        }
+        if environment["WORKBOARD_PREVIEW_AUTOMATION_ONLY"] == "1", let detail = store.detail, detail.automation != nil {
+            for mode in [AppearanceMode.light, .dark] {
+                appearance.theme.appearance = mode
+                let scheme: ColorScheme = mode == .dark ? .dark : .light
+                try capture(TaskAutomationSection(detail: detail).environmentObject(appearance).environmentObject(store).environment(\.colorScheme, scheme).padding(24), size: NSSize(width: 480, height: 350), appearance: mode == .dark ? .darkAqua : .aqua, output: output.appendingPathComponent("automation-\(mode.rawValue).png"))
+            }
+            print("Automation pixel previews from the actual isolated service: \(output.path)")
+            app.terminate(nil)
+            return
+        }
         for mode in [AppearanceMode.light, .dark] {
             appearance.theme.appearance = mode
             let root = BoardView().environmentObject(appearance).environmentObject(store).tint(appearance.accent).preferredColorScheme(mode.colorScheme).environment(\.colorScheme, mode == .dark ? .dark : .light)

@@ -100,7 +100,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(parent)?;
     }
     let reloader = WidgetReloader::start();
-    let opened = Board::open(&data_dir)?;
+    let mut opened = Board::open(&data_dir)?;
+    reconcile_executor_registry(&mut opened, &data_dir)?;
     if opened.take_widget_change() {
         reloader.request();
     }
@@ -111,6 +112,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let running = Arc::new(AtomicBool::new(true));
     let alive = Arc::clone(&running);
     ctrlc::set_handler(move || alive.store(false, Ordering::SeqCst))?;
+    let automation = start_automation_worker(
+        Arc::clone(&board),
+        Arc::clone(&running),
+        data_dir.clone(),
+        socket.clone(),
+    );
     eprintln!("workboard-service ready: {}", socket.display());
     let mut clients = Vec::new();
     while running.load(Ordering::SeqCst) {
@@ -153,8 +160,128 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     for client in clients {
         let _ = client.join();
     }
+    let _ = automation.join();
     let _ = FileExt::unlock(&lock);
     Ok(())
+}
+
+fn reconcile_executor_registry(
+    board: &mut Board,
+    data_dir: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let directory = data_dir.join("plugins");
+    if !directory.is_dir() {
+        board.reconcile_automation_executors(&serde_json::json!({}))?;
+        return Ok(());
+    }
+    let reconciled = (|| -> Result<(), Box<dyn std::error::Error>> {
+        // Plugin edits hold the same lock, so a concurrent disable cannot escape startup fencing.
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(directory.join("registry.lock"))?;
+        let started = Instant::now();
+        loop {
+            match lock.try_lock_exclusive() {
+                Ok(()) => break,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && started.elapsed() < Duration::from_secs(1) =>
+                {
+                    thread::sleep(Duration::from_millis(20))
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let path = directory.join("registry.json");
+        let registry = if path.is_file() {
+            serde_json::from_slice(&fs::read(path)?)?
+        } else {
+            serde_json::json!({})
+        };
+        board.reconcile_automation_executors(&registry)?;
+        Ok(())
+    })();
+    if let Err(error) = reconciled {
+        eprintln!("Optional executor registry unavailable; workflow execution is blocked: {error}");
+        board.reconcile_automation_executors(&serde_json::json!({}))?;
+    }
+    Ok(())
+}
+
+/// Only the generic host runs here. Provider discovery and calls stay behind enabled plugins.
+fn start_automation_worker(
+    board: Arc<Mutex<Board>>,
+    running: Arc<AtomicBool>,
+    data_dir: PathBuf,
+    socket: PathBuf,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        use std::os::unix::process::CommandExt;
+        let executable = std::env::var_os("WORKBOARD_CLI_BIN")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|path| path.parent().map(|parent| parent.join("workboard")))
+            });
+        while running.load(Ordering::SeqCst) {
+            let pending = board
+                .lock()
+                .map(|board| board.has_automation_work())
+                .unwrap_or(false);
+            if pending {
+                if let Some(executable) = &executable {
+                    match Command::new(executable)
+                        .arg("automation")
+                        .arg("worker")
+                        .arg("--data-dir")
+                        .arg(&data_dir)
+                        .arg("--socket")
+                        .arg(&socket)
+                        .arg("--json")
+                        .process_group(0)
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::inherit())
+                        .spawn()
+                    {
+                        Ok(mut child) => {
+                            let started = Instant::now();
+                            loop {
+                                if child.try_wait().ok().flatten().is_some() {
+                                    break;
+                                }
+                                if !running.load(Ordering::SeqCst)
+                                    || started.elapsed() > Duration::from_secs(40)
+                                {
+                                    unsafe {
+                                        libc::kill(-(child.id() as i32), libc::SIGTERM);
+                                    }
+                                    thread::sleep(Duration::from_millis(200));
+                                    let _ = child.kill();
+                                    let _ = child.wait();
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                        }
+                        Err(error) => eprintln!("automation worker: {error}"),
+                    }
+                }
+            }
+            for _ in 0..10 {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    })
 }
 fn client(
     mut stream: UnixStream,

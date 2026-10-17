@@ -237,6 +237,53 @@ The cause was not established. Two changes were made:
 - Change LaunchAgent `ProcessType` from Background to Standard for user-triggered requests. Installed priority changed from 4 to 20.
 - Log request arrival/lock/processing and accept-loop delays over two seconds with timestamps to `~/Library/Logs/AgentWorkboard/service-error.log`, to distinguish scheduling delays from internal blocking on recurrence.
 
+## Agent automation verification, October 18, 2026
+
+The first per-task development workflow is implemented. The following checks used isolated boards; no paid model or external account was used.
+
+| Check | Evidence |
+| --- | --- |
+| Rust tests | `cargo test --workspace`: 94 tests passed (12 CLI, 78 core, 4 socket integration). Includes stage transitions, report/exit separation, rework limits, stale tokens, shared workspace ownership, required checklists, Trash, restore, deadlines, and executor changes while the service was stopped. |
+| Rust build and static checks | `cargo build --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` passed. |
+| Full Python regression | `python3 -m unittest discover -s tests -q`: 303 tests passed. Includes seven automation checks with the actual service/host and harmless agent processes, disabled and malformed optional registries, nested submodule fingerprints, and existing provider/core regressions. |
+| Swift | `swift build --package-path macos` and `WORKBOARD_BIN="$PWD/target/debug/workboard" macos/Tests/run-workflows.sh` passed. The actual service supplied workflow configuration, task/card metadata, revision conflicts, and disable behavior. |
+| Separate plugin packages | All six ZIPs passed extraction, CLI installation, and disabled-default checks. Orca package version is 0.3.0. These checks started no optional executable or account connection. |
+| Actual Orca runtime | `scripts/verify-automation-orca.py` used the installed local Orca runtime and an isolated board. Six synthetic stages ran exactly once: preflight, work, review requesting changes, rework, passing review, release preparation. All six reported and confirmed process exit; the task waited for final approval. All six test terminals were closed. Evidence: `.build/automation-live-final-20261018/evidence.json`. |
+| Pixel QA | Actual isolated service data rendered in light and dark automation panels; both images were inspected. Evidence: `.build/automation-native/previews/automation-light.png` and `automation-dark.png`. These are NSHostingView render checks. |
+| Native interaction limit | This Mac has Command Line Tools rather than full Xcode. Native test-window targeting returned `cgWindowNotFound`; automated button clicks were not verified. The isolated preview service and test defaults were cleaned up. |
+
+Actual Codex/Claude authentication, sandbox permissions, model behavior, and paid calls remain unverified. The existing installed app and operational board were not updated. See [automation](automation.md) for configuration and recovery, and [Mac builds](macos-build.md) for installation requirements.
+
+## Status rules, defaults, and installed rollout, October 18, 2026
+
+The follow-up adds project defaults for new tasks, per-status rules, and required skills, prompts, instructions, and agent selection per rule or development stage. These checks supersede the automation-specific limits above; they do not verify every native widget, account, or distribution path.
+
+| Check | Evidence |
+| --- | --- |
+| Rust | 101 tests passed (12 CLI, 85 core, 4 socket). Includes defaults inheritance, stale editors across restore including removal/recreation, true status edges, pending rules after confirmed exit, frozen stage settings, single-stage column preservation, and final changes requesting bounded rework. Build and clippy with warnings denied passed. |
+| Full Python regression | 305 tests passed after rebuilding the embedded agent protocol. Includes nine service/host automation checks, project-default prompt delivery, sandbox handoff without a service socket, and all existing provider/core regressions. |
+| Sandbox reporting | Orca supplies a private handoff directory. The agent's report command writes a mode-0600 file without a token or board connection. The executor submits it after process exit, then settles the exit separately. Python regression includes reporting with an absent service socket. |
+| Actual Codex | Four real signed-in stages passed: preflight, work, independent review, release. All applied the required local smoke skill and included prompt/instruction markers, reported, and exited. State remained `awaiting_approval`. Evidence and per-stage logs: `.build/automation-real-codex-handoff/`. This was a small read-only transport task, not a substantive implementation benchmark. |
+| Actual Claude | After the user renewed the expired CLI OAuth session, a real preflight status rule passed using Claude's auto permission mode. Skill, prompt, and instruction markers were recorded and the process exited. State became `waiting`. Evidence/log: `.build/automation-real-claude-auto/`. |
+| Real Orca rework | The latest handoff executor completed six synthetic stages with a changes-requested/rework/review loop through the actual runtime. Evidence: `.build/automation-orca-handoff/evidence.json`. No model was called in this separate check. |
+| Native app | A CUA-driven status-menu selection moved a card to In Progress and started one real Orca terminal with a synthetic agent. The app displayed the completed result after refresh. CUA also opened project defaults, edited required skills, prompt, and instructions, and saved values verified from the service. Evidence: `.build/automation-status-ui/evidence.json`. CUA drag attempts did not change the card, so drag interaction remains unverified. |
+| Swift | Production app build and actual Store/service regression passed, including rule editor data, defaults inheritance, and status moves. Native form rendering was visually inspected. |
+| Installation | A production bundle was built, signed locally, installed in the user's Applications directory, and registered with the user service. Orca was updated separately to 0.4.0 with its existing configuration preserved. Both agent kits were updated. The service returned healthy after migration from database version 5 to 7. All existing fields of the nine operational tasks matched the backup. The Agent Workboard project now applies enabled defaults to new cards: In Progress starts development; In Review runs a single independent review. Both use Codex in the current hippocamp worktree. Existing cards retain their own configuration. Rollout evidence: `.build/automation-rollout/evidence.json`. Backup: `~/orca/backups/agent-workboard/automation-status-rules-20261018/`. |
+
+The first live agent attempts exposed sandbox socket restrictions and an expired Claude login. The final executor uses token-free file handoff instead of weakening the Codex sandbox; Claude uses its normal auto permission classifier. Failed runs and logs are kept separately from successful evidence. All successful smoke-test terminals were closed. Core source, account integrations, and the actual desktop widget require their existing independent checks.
+
+## Per-card creation mode verification, October 18, 2026
+
+New task and subtask forms now offer Project default, Use automation, and Manual work. Manual selection suppresses automation inheritance for the whole template-created task family; ordinary status changes remain manual. Explicit automation can use a saved configuration when project inheritance is off. Missing configuration and invalid modes reject the entire creation transaction.
+
+- `cargo test --workspace`: 103 tests passed (12 CLI, 87 core, 4 socket); build and clippy with warnings denied passed.
+- `python3 -m unittest discover -s tests -q`: 306 tests passed, including the actual CLI manual-creation override with an enabled project and zero executor launches.
+- The actual Swift Store/service regression passed manual card creation and movement, manual template children, explicit automation, and default configuration reads.
+- Six light/dark creation previews used an isolated real service. The manual light and automatic dark forms were inspected for readable controls and help text. Evidence: `.build/automation-creation-choice/previews/`. These are render checks, not native click evidence.
+- The release bundle was installed, its signed CLI/service matched the staging bundle, and the installed service returned healthy. Evidence: `.build/automation-creation-choice/evidence.json`.
+
+Current-stage badges and Stage history are unchanged. Automatic review projects a card into In Review; other development stages project it into In Progress, and final approval waits in In Review.
+
 ## Remaining checks
 
 | Area | Current evidence | Next verification |
@@ -247,7 +294,38 @@ The cause was not established. Two changes were made:
 | Slack accounts | Mocked provider/host and Swift checks. | Actual token/workspace permissions, search/read/sending, Keychain. |
 | Linear accounts | Mocked provider/host and Swift model checks; invalid-key error shape from the real API. | Actual API key/workspace permissions, search/read, comments, state changes, Keychain. |
 | GitHub writes | Mocked provider/host and Swift checks; live gh-mode reads on a public repository. | Actual status comment and issue creation, token-mode Keychain, fine-grained token permissions, native GitHub screens. |
-| Orca agents | Isolated actual runtime and harmless terminal launch. | Actual agent authentication/model calls and native launch controls. |
+| Orca agents | Real Codex four-stage smoke, real Claude single-stage smoke, real Orca synthetic rework loop, native status-menu trigger. | Substantive coding tasks, native drag interaction, and longer-running operational recovery. |
 | External distribution | Local ad-hoc installation/DMG; personal-team widget proof. No Developer ID on the second Mac. | Developer ID/hardened runtime/notarization and target-Mac installation. |
 
 Signing/container evidence is in [Mac builds](macos-build.md). No privacy/ACL bypass was used. [Acceptance audit](completion-audit.md) maps criteria to evidence. Do not mark the whole product complete before required checks are satisfied. Binary distribution/signing/notarization remain separate from source hosting.
+
+## Reusable process presets (October 18)
+
+Implemented the board-wide preset library, three read-only built-ins, custom ordered stages, conditional rework, task creation selection, project/card configuration, and agent selection with a recorded reason. Presets are stored through the service and frozen per configured task. The optional Orca executor is version 0.5.0.
+
+| Evidence | Result |
+| --- | --- |
+| Rust 109 tests | Library CRUD and stale revisions, immutable built-ins, frozen task definitions after edits/deletion, restore revision watermarks, small process/rework limits, large process planning/verification/source preservation, authorized agent selection/report/exit, assignment/revision/active-process guards, existing workflows and socket checks passed. |
+| Python 308 tests | Full suite passed. Actual service/CLI/host/Orca-plugin fixture checks exercised agent selection, the chosen small process and rework, CLI library operations, task overrides, and manual template children. Six separately packaged plugins passed extraction, installation, and disabled-default checks. |
+| Swift | App build, existing model/service runner, and Workflow Store regression passed. The latter saved an editable preset, selected it during task creation, preserved skills/prompts, ignored a hidden selection for manual work, and retained the task copy after library deletion. |
+| Actual native app | In a disposable release-bundle app, created a preset, moved a stage down and back up, saved skill/prompt/instructions, and selected that preset while creating a card. The real service retained the settings and had zero attempts after creation. Test app/service and temporary preferences were cleaned. Evidence: `.build/preset-native/evidence.json` and its SQLite snapshot. |
+| Actual Codex through Orca | A real `select` process chose `small` with a concrete rationale, followed by real implementation and independent review processes. All three reports passed through the private file handoff, all processes confirmed exit, the workflow waited for human approval, and all three terminals closed. This smoke task deliberately required no source edits. Evidence: `.build/preset-real-codex/evidence.json`. |
+| Visual review | Inspected the real SwiftUI light library, dark preset editor, and light creation form from an isolated service. Six light/dark renders are in `.build/preset-previews/`. This is offscreen pixel QA, separate from the native interaction above. |
+| Installation | Updated the installed app/CLI/service and separate Orca 0.5.0 plugin; preserved its existing configuration. Updated both agent kits. The Agent Workboard project's future tasks now delegate preset selection (`auto`); existing status rules and executor settings remain. All nine existing task records were identical before/after. The installed bundle hashes match the verified release, doctor is healthy, and the installed app visibly opens the preset library. Evidence: `.build/preset-rollout/evidence.json`. Backup: `~/orca/backups/agent-workboard/process-presets-20261018/`. |
+
+Format, clippy, diff whitespace, and English-only checks passed. The new automatic preset selection was verified with actual Codex. Existing real Claude stage evidence remains separate; a new real Claude preset-selection run was not performed. No widget gallery, Google account, deployment, merge, or task completion was inferred from these checks.
+
+## Review before merging automation
+
+The full automation change was reviewed before publication. These defects were reproduced before their fixes:
+
+| Finding | Final behavior and regression evidence |
+| --- | --- |
+| CLI preset selection omitted the session agent ID. | Automation controls include identity and the service checks assignment. Task/template creation records the selecting agent. A real CLI/service test rejects another assignee and records the holder's selections. |
+| Restore could discard an unresolved worker's resource lease and rewind workflow revisions. | Restore refuses unresolved processes, including disabled or trashed workflows. Workflow revision watermarks advance beyond live and restored values. Regression tests preserve an active callback after a refused restore and reject repeated revision reuse. Restored tokens are rotated for trashed workflows too. |
+| Deleting an allowed candidate could make an ordinary task edit fail. | Task edits fence and reset using the frozen process. A new selection resolves current candidates only when explicitly resumed. A failing status-rule start rolls back its run and stage writes. Both cases have core regressions. |
+| The stage process inherited executor callback credentials, and the agent policy allowed exit callbacks. | Orca removes the callback token from the agent environment. Offline reports require no token; submit/settle commands require approval in the Codex policy. Every synthetic stage asserts that it received no token, and the offline report test uses no credential. |
+| Single-stage cards could display a different stage from their saved process. | Single-stage actions display their actual stage; a Swift model regression covers a review action on an implementation-first preset. |
+| CLI mutation retries reread newer revisions and conflicted with their own successful request. | Revision-pinned core requests persist exact parameters before sending and recover the original response or request after interruption. CLI/service tests cover controls, preset save/delete, defaults, payload conflicts, and identity. External plugin pending calls remain non-replayable; a separate journal regression covers safe core recovery. |
+
+No additional unresolved merge-blocking finding remained in the reviewed change. Final verification passed Rust 115 tests, Python 310 tests, format, clippy with warnings denied, the Swift model/service and Workflow Store runners, a signed local production app/widget build, and six separate plugin package checks. The final token-free agent environment also passed a fresh actual Codex selection/implementation/review run; all three processes exited and terminals closed. Evidence is in `.build/automation-review/real-codex/evidence.json`. The reviewed build and plugin were installed with nine task records and the Orca configuration preserved; `.build/automation-review/rollout.json` records their hashes and health. Publication details are recorded with the pull request. Earlier real-agent, native interaction, widget, and external-account evidence retains its stated scope.

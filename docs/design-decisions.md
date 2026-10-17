@@ -47,6 +47,30 @@ These choices established the initial build direction. Verify versions, minimum 
 
 The first proposal considered a Swift core, Swift Argument Parser, GRDB, and XPC. The Rust discussion changed the core, CLI, database access, and transport; SwiftUI and WidgetKit remained. Optional agent-memory evolved into an independently installed plugin alongside Google Workspace. Plugins remain disabled after installation.
 
+## Agent automation, October 18, 2026
+
+The board owns the versioned development workflow, stage evidence, resource claims, and pending launches in SQLite. A generic service worker invokes separately enabled executor plugins outside database transactions. The first executor reuses Orca's existing terminal CLI with fresh one-shot agent processes and separate result/exit receipts. This keeps the workflow reusable with other executors while preserving the existing task service as the only writer.
+
+Automatic review passes are stage outcomes. The existing final approval request still completes the task only after release preparation and ordinary completion checks. The initial implementation used a fixed template. Project defaults, status rules, and editable process presets now extend it, as described below.
+
 ## Implementation status
 
 The Rust core/service/CLI, SwiftUI app, WidgetKit extension, and separate plugins are implemented and being verified. Transactions, real socket/CLI connections, builds, and local installation have been checked. A second Mac with full Xcode and personal-team signing verified the actual desktop widget and baseline native app interactions. New planning/plugin screens and real Google/Slack/Linear accounts, and real GitHub writes retain their own unverified scope. See [verification](verification.md); the memory engine has not been ported.
+
+## Status-driven agent rules and project defaults
+
+Project defaults live in the persistent board SQLite settings under project-scoped keys. The service inherits a frozen configuration for newly created tasks, including template children and Inbox promotions. Existing cards remain independently configurable. A saved revision prevents competing project editors from overwriting each other, including after restore.
+
+The service compares status before and after each ordinary mutation. A true edge can launch one configured rule. Development projections bypass this trigger, preventing review/rework loops caused by internal column changes. Single-stage actions preserve task status and wait after their report and process exit. A manual transition during an unresolved attempt queues the new rule and fences late results until exit confirmation.
+
+Each attempt stores selected skills, prompt, instructions, and agent settings. Optional stage overrides support the development workflow. Executors pass required skill names or paths to the selected agent; missing skills must block the stage. The core does not discover or install agent skills.
+
+Sandboxed agents write a private token-free report handoff instead of opening the board socket. The executor submits the result after the real process exits, then records that exit separately. This keeps ordinary agent sandbox settings while preserving the service's stage evidence and exit checks.
+
+## Reusable process presets and agent selection
+
+The shared preset library uses persistent SQLite settings and the same service mutation boundary as tasks. Built-ins are virtual read-only definitions; custom definitions have monotonically increasing revisions, including after restore. No plugin or new database schema is needed for the library.
+
+Each configured task freezes its explicit selected definition. Automatic selection freezes allowed candidates when the selection attempt starts. A normal evidence report names the selected candidate and reason; only report acceptance plus real process exit can advance. The execution cursor identifies each ordered step, so repeated kinds retain distinct settings and evidence. Library edits never rewrite active plans. Conditional rework resumes downstream of the nearest implementation, with the lower preset/project loop limit. Finishing any selected process still requires human final approval.
+
+Agents can inspect and apply presets through the CLI to inactive, unassigned or self-assigned tasks. Selection checks task and workflow revisions and does not launch an executor. Creating a manual task omits process selection. Older configurations without a preset keep the legacy engine.

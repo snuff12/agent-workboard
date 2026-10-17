@@ -295,6 +295,12 @@ pub enum TemplateCommand {
         template_id: String,
         #[arg(long)]
         project: String,
+        #[arg(long, default_value = "inherit", value_parser = ["inherit", "automatic", "manual"], help = "Automation mode for every task created from this template")]
+        automation: String,
+        #[arg(long, help = "Process preset ID or auto for agent selection")]
+        process_preset: Option<String>,
+        #[arg(long)]
+        preset_reason: Option<String>,
         #[arg(long)]
         parent: Option<String>,
         #[arg(long)]
@@ -342,11 +348,20 @@ impl TemplateCommand {
             Self::Apply {
                 template_id,
                 project,
+                automation,
+                process_preset,
+                preset_reason,
                 parent,
                 title,
                 status,
             } => {
-                let mut p = json!({"template_id":template_id,"project_id":project});
+                let mut p = json!({"template_id":template_id,"project_id":project,"automation_mode":automation});
+                if let Some(v) = process_preset {
+                    p["process_preset"] = json!(v);
+                }
+                if let Some(v) = preset_reason {
+                    p["preset_reason"] = json!(v);
+                }
                 if let Some(v) = parent {
                     p["parent_id"] = json!(v);
                 }

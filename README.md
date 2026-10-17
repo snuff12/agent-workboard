@@ -26,6 +26,8 @@ The default UI is a simple kanban board with Linear's workflow columns: Backlog,
 
 ## Planning workflows
 
+Project defaults and status rules in opt-in [agent automation](docs/automation.md) select agents, required skills, prompts, and instructions. Reusable process presets select a short or extended stage sequence per task. People or agents can choose a preset, or a selection stage can choose and explain it automatically. Built-ins cover small, standard, and large tasks; custom presets save stage order and execution settings. The board owns stage state and evidence; the separately installed Orca executor launches fresh agent processes. Final approval stays with the user.
+
 These six features work without external accounts:
 
 | Feature | Behavior |
@@ -55,7 +57,7 @@ scripts/install-local.sh --start-service
 
 Data defaults to `~/Library/Application Support/AgentWorkboard`. Use `--data-dir` and `--socket` for isolated development data. See the [CLI contract](docs/cli-contract.md) and [Google Workspace guide](docs/google-workspace.md).
 
-`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app, named `dist/AgentWorkboard-plugin-<id>-<version>.zip` (for example `AgentWorkboard-plugin-orca-0.2.0.zip`). Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.2.0`. Installation leaves the plugin disabled; follow its guide to configure it.
+`scripts/package-plugins.sh` creates plugin ZIPs separately from the core app, named `dist/AgentWorkboard-plugin-<id>-<version>.zip` (for example `AgentWorkboard-plugin-orca-0.5.0.zip`). Extract only the packages you need. In the app, choose Install in plugin settings and select a directory containing `plugin.json`. The CLI equivalent is `workboard plugin install /path/to/orca-0.5.0`. Installation leaves the plugin disabled; follow its guide to configure it.
 
 `scripts/verify-plugin-packages.sh` checks the two files in each ZIP, extracts and installs it through an isolated CLI, and verifies the disabled default. It does not use the user's board or external accounts.
 
@@ -102,6 +104,7 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 | [Orca](docs/orca-integration.md) | Worktrees, terminals, imports, attachments, launches |
 | [GitHub](docs/github.md) | Issues, pull requests, scoped search, linked status, status comments, tokens |
 | [Agent integration](docs/agent-integration.md) | Claude Code and Codex session context, protocol, identity, sandbox rules |
+| [Agent automation](docs/automation.md) | Development stages, Orca execution, review/rework, pause, recovery, and final approval |
 | [Verification](docs/verification.md) | Passing checks, installation evidence, remaining external checks |
 
 ## Everyday workflow
