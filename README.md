@@ -2,7 +2,7 @@
 
 A local macOS workboard for people and coding agents. Manage the same tasks through a Rust CLI, a desktop kanban app, and a native desktop widget. Break large goals into subtasks, keep results and next actions attached, and install only the integrations you need.
 
-The project is `agent-workboard`. Its Rust service and CLI, SwiftUI app, and WidgetKit extension are implemented and undergoing integration verification. An Xcode build signed with a personal development team has displayed the actual desktop widget and reflected CLI changes. Google account integration and notarized external distribution still require separate verification.
+The project is `agent-workboard`. Its Rust service and CLI, SwiftUI app, and WidgetKit extension are implemented and undergoing integration verification. An Xcode build signed with a personal development team has displayed the actual desktop widget and reflected CLI changes. Real Calendar sign-in and calendar listing have passed; event operations, Gmail, and notarized external distribution still require separate verification.
 
 ## Core requirements
 
@@ -13,6 +13,8 @@ The project is `agent-workboard`. Its Rust service and CLI, SwiftUI app, and Wid
 5. All core features work without installing integration plugins.
 
 agent-memory, Google Workspace, Slack, and Orca integrations are separate plugin packages. The core app contains neither their executable code nor dedicated dependencies. Installed plugins remain disabled until the user enables them. Attach ordinary files, URLs, and artifacts without any plugin.
+
+In plugin settings, choose **Connect** to detect local tools or sign in to a service. Google Workspace uses the publisher's registered Desktop OAuth client; people downloading a configured package only select services, sign in, and approve access. The local Google Workspace 0.2.1 package has completed real Calendar sign-in and calendar-list verification in testing mode. General distribution still requires production configuration and applicable Google verification. See [connection setup](docs/plugin-onboarding.md).
 
 The agent-memory plugin searches existing documents and memories and submits explicitly selected decisions as memory candidates. Google Workspace centers on Calendar deadlines and meetings, with optional Gmail search and attachments. Orca browses local worktrees and run terminals, imports work as tasks, and launches board tasks through Codex or Claude.
 

@@ -2,13 +2,21 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## Google publisher configuration
+
+On October 18, 2026, the real product-owned Desktop OAuth client was created in the prepared Cloud project. Three user-selected accounts were added as test users, and `calendar.events`, `calendar.calendarlist.readonly`, and optional `gmail.readonly` were declared and saved. A second-account `403 access_denied` was traced to its absence from the test-user list, corrected, and followed by successful sign-in. A third account was then added at the user's request and confirmed in the saved audience. Publishing remains External/Testing; production branding and applicable scope verification are separate work.
+
+Google Workspace 0.2.1 packages the sanitized Desktop metadata outside the core app. It also preserves main's newer Keychain account-label checks, including read/disconnect compatibility for earlier labels. Workspace provider/host tests passed (44), as did OAuth packaging tests (2) and separate archive extraction/CLI installation/default-disabled checks. Only Google Workspace was replaced in the user's installation. Its saved configuration/enabled state and other plugins were unchanged; service-read project/task fingerprints matched before and after (one project, nine tasks).
+
+Installed explicit setup reports `available: true`; native Try again refreshes the existing Google connection sheet and enables Sign in with Google with Calendar on and Gmail off. Earlier sign-in attempts timed out. The user then completed the real two-scope Google consent flow, the native app reported Google Workspace connected, and the installed CLI's check read its Keychain token and returned `connected: true`, `calendar_count: 2`, `calendar_enabled: true`, and `gmail_enabled: false`, with no board operations applied. Refresh was not forced, and no actual event writes/imports or Gmail reads were performed. Screenshots of the registered client, saved test accounts, scopes, consent, and connected app are ignored local artifacts under `.build/google-oauth-20261018/`. Publisher JSON is ignored under `.local/google-workspace/`; no tokens or client secret are committed.
+
 ## Plugin connection setup
 
 On October 16, 2026, plugin connections gained explicit setup/discovery, a simple Connect screen, publisher-configured Google sign-in, and settings-preserving package updates. Rust 71 and Python 157 tests passed, together with clippy, Swift build/runners, release signing/plist checks, separate ZIP checks with and without Desktop OAuth metadata, and installer checks. New setup checks verify disabled-state isolation, no board/service side effects, generation conflicts, cancellation, local tool detection, and configuration preservation during package updates.
 
 The release app and all four 0.2.0 packages were installed on this Mac. Existing projects/tasks and saved plugin settings were preserved. Native settings clicks detected the installed amem CLI and connected it, and detected Orca plus the matching board repository and connected it without path/selector input. Installed CLI checks then verified both connections. The Google screen showed Calendar/Gmail choices and browser sign-in without a client-file field; Slack's normal flow uses a secure token field and detects its workspace.
 
-Google publisher registration is not yet complete: a dedicated Cloud project and the required APIs were prepared. The owner authorized the Google API Services User Data Policy consent, Desktop client creation, and test-user setup, but Chrome window control became unavailable before submission. No real client is packaged yet, and no real Google OAuth login or Slack account operation was claimed. Native screenshots and redacted results are local under `.build/plugin-onboarding/`; user task text/tokens are not committed. The documentation distinguishes one-time publisher setup from each user's account consent and the separate public-release verification requirements. See [connection design and research](plugin-onboarding.md).
+At that October 16 stage, a dedicated Cloud project and the required APIs were prepared, but Chrome control became unavailable before completing registration. The October 18 evidence above supersedes that registration status. No real Google OAuth login or Slack account operation was claimed. Native screenshots and redacted results for the earlier stage are local under `.build/plugin-onboarding/`; user task text/tokens are not committed. See [connection design and research](plugin-onboarding.md).
 
 ## Plugin readiness audit
 
@@ -176,7 +184,7 @@ The cause was not established. Two changes were made:
 | Area | Current evidence | Next verification |
 | --- | --- | --- |
 | Desktop widget | Personal-team Xcode build works on the second Mac; Command Line Tools builds were purged even with team signing. | Staleness after 15-minute service stop, login startup, accent changes, other Macs/distribution signatures. |
-| Google accounts | No Desktop OAuth client provided; mocked APIs/local callback only. | Actual consent/refresh, Calendar create/update/import, optional Gmail. |
+| Google accounts | Publisher client/test audience, actual Google consent, native connection, and Keychain-backed listing of two calendars verified. | Token refresh, Calendar create/update/import, optional Gmail. |
 | Native app | Seven baseline XCUITests on the second Mac. | New planning/plugin screens and shortcuts, menu bar, restore picker/confirmation; widget links were manually verified but not automated. |
 | Slack accounts | Mocked provider/host and Swift checks. | Actual token/workspace permissions, search/read/sending, Keychain. |
 | Orca agents | Isolated actual runtime and harmless terminal launch. | Actual agent authentication/model calls and native launch controls. |

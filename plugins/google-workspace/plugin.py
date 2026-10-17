@@ -57,8 +57,22 @@ def scopes(config):
     return selected
 
 
+# `security -i` parses one command per line, so stored account labels must need no quoting.
+ACCOUNT = r"[A-Za-z0-9._@-]{1,80}"
+
+
+def account_label(value):
+    if not isinstance(value, str) or not re.fullmatch(ACCOUNT, value):
+        raise IntegrationError("Connecting stores the key under the account label, which must be 1 to 80 ASCII letters, "
+                               "digits, periods, underscores, at signs, or hyphens. Disconnect, change the label, and "
+                               "connect again.", "INVALID_REQUEST")
+    return value
+
+
 def keychain(account, token=None, remove=False):
     if token is not None:
+        # Read and removal pass saved labels as separate arguments, including older labels.
+        account_label(account)
         # Send token material over stdin, never process arguments or stdout.
         line = "add-generic-password -U -s %s -a %s -w %s\n" % tuple(
             shlex.quote(v) for v in (SERVICE, account, json.dumps(token)))
@@ -497,7 +511,7 @@ def run(request):
         keychain(account, remove=True)
         return {"ok": True, "result": {"connected": False}}
     if method == "authorize":
-        result = authorize(config, account)
+        result = authorize(config, account_label(account))
         result["config"] = {"account": account, "calendar_enabled": enabled(config, "calendar"), "gmail_enabled": enabled(config, "gmail")}
         return {"ok": True, "result": result}
     if method not in METHODS and method != "check":

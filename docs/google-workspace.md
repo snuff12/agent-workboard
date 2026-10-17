@@ -22,7 +22,7 @@ This optional plugin needs Python 3.9+ and macOS Keychain, with no pip packages.
 
 For a publisher-configured package, open **Settings → Plugins → Connect**, choose Calendar and optional Gmail, and select **Sign in with Google**. The browser handles account selection and consent. The plugin is enabled only after authentication succeeds. Cancel stops the local callback process. No client file, account label, or JSON editing is required in the normal flow.
 
-Google Cloud registration is a publisher task, performed once for the product. Each person downloading the configured plugin only connects their own account. Testing builds are limited to accounts on the publisher's test-user list; a general release needs production configuration and applicable Google verification. The current local package still awaits a real publisher client and cannot sign in yet. See [Google's production and testing requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification).
+Google Cloud registration is a publisher task, performed once for the product. Each person downloading the configured plugin only connects their own account. Testing builds are limited to accounts on the publisher's test-user list; a general release needs production configuration and applicable Google verification. The October 18 local 0.2.1 package contains the real publisher client; native Google consent, Keychain-backed authentication, and listing two actual calendars passed with Gmail off. Token refresh, event changes/import, and Gmail operations still need their own live verification. See [Google's production and testing requirements](https://developers.google.com/identity/protocols/oauth2/production-readiness/brand-verification).
 
 The publisher registers one Desktop OAuth app and builds the package with `scripts/package-plugins.sh --google-oauth-client /private/path/desktop-client.json`. Only Desktop client ID/secret metadata is included in the separate plugin, never user access/refresh tokens. These native-app client credentials are public client metadata, not a confidential web-app secret. The publisher must own this client and complete Google's applicable consent/verification steps; never borrow another product's client identity. See [native OAuth](https://developers.google.com/identity/protocols/oauth2/native-app) and [connection setup](plugin-onboarding.md). An unconfigured build reports that sign-in is unavailable before opening a browser.
 
@@ -33,7 +33,7 @@ The following manual developer setup remains available under **Advanced settings
 3. Store client JSON privately outside the repository and app bundle.
 4. Install the plugin and configure services and the JSON path.
 
-Extract `AgentWorkboard-plugin-google-workspace-0.2.0.zip` and select the `google-workspace-0.2.0` directory containing `plugin.json` and `plugin.py`. Replace the source directory below with that extracted path when using a release ZIP. Do not install the ZIP itself. Rebuild archives with `scripts/package-plugins.sh`; core apps/DMGs exclude provider code.
+Extract `AgentWorkboard-plugin-google-workspace-0.2.1.zip` and select the `google-workspace-0.2.1` directory containing `plugin.json`, `plugin.py`, and the publisher's optional `oauth-client.json`. Replace the source directory below with that extracted path when using a release ZIP. Do not install the ZIP itself. Rebuild archives with `scripts/package-plugins.sh`; core apps/DMGs exclude provider code.
 
 ```sh
 workboard plugin install ./plugins/google-workspace

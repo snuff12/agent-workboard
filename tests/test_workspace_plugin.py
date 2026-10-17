@@ -362,5 +362,41 @@ class WorkspacePlugin(unittest.TestCase):
         self.urlopen.assert_not_called()
 
 
+class WorkspaceKeychainLabels(unittest.TestCase):
+    def test_unsafe_labels_fail_before_keychain_storage_or_authorization(self):
+        labels = ["O'Brien", "work\nlist-keychains", "two words", "", "caf\u00e9", "a" * 81, 'quote"d', "back\\slash"]
+        with mock.patch.object(workspace.subprocess, "run") as process, \
+                mock.patch.object(workspace, "authorize") as authorize:
+            for label in labels:
+                with self.subTest(label=label):
+                    with self.assertRaises(workspace.IntegrationError) as caught:
+                        workspace.keychain(label, {"access_token": "MOCK_TOKEN"})
+                    self.assertEqual(caught.exception.code, "INVALID_REQUEST")
+                    with self.assertRaises(workspace.IntegrationError):
+                        workspace.run({"method": "authorize", "config": {"account": label, "calendar_enabled": True}})
+            process.assert_not_called()
+            authorize.assert_not_called()
+
+    def test_saved_legacy_labels_can_still_be_read_and_disconnected(self):
+        for label in ["two words", "caf\u00e9", "a" * 90, "O'Brien", "work\nlist-keychains"]:
+            with self.subTest(label=label), mock.patch.object(workspace.subprocess, "run",
+                    return_value=mock.Mock(returncode=0, stdout='{"k":"v"}')) as process:
+                self.assertEqual(workspace.keychain(label), {"k": "v"})
+                workspace.run({"method": "disconnect", "config": {"account": label}})
+                for call in process.call_args_list:
+                    args = call.args[0]
+                    self.assertNotIn("-i", args)
+                    self.assertEqual(args[args.index("-a") + 1], label)
+                self.assertIn("delete-generic-password", process.call_args.args[0])
+
+    def test_safe_labels_can_still_store_tokens_over_stdin(self):
+        for label in ["default", "work-mail@example.com", "team_1.backup"]:
+            with self.subTest(label=label), mock.patch.object(workspace.subprocess, "run",
+                    return_value=mock.Mock(returncode=0, stdout="")) as process:
+                workspace.keychain(label, {"access_token": "MOCK_TOKEN"})
+                self.assertEqual(process.call_args.args[0], ["/usr/bin/security", "-i"])
+                self.assertIn(" -a %s " % label, process.call_args.kwargs["input"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
