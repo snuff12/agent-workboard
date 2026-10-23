@@ -187,7 +187,7 @@ workboard plugin remove agent-memory --json
 
 The core ships without integrations. Installed plugins remain disabled. Return `PLUGIN_NOT_INSTALLED`, `PLUGIN_DISABLED`, or `PLUGIN_INCOMPATIBLE` without running the provider. Enabled external failures return `INTEGRATION_UNAVAILABLE` or a specific error for that call and preserve core service/task behavior.
 
-Core `doctor` judges only core health. Absent/disabled/failed integrations do not fail it. Explicit `plugin check` checks enabled external connections. `plugin list` returns installation/enabled metadata without configuration. `plugin config <id>` / RPC `plugin.config {id}` returns `{id,config}`, including while disabled. Neither read starts the provider or task service.
+Core `doctor` reports database health in `core_healthy` and widget publication health in `widget`. Overall `healthy` is false and `status` is `degraded` when a configured or default widget destination cannot be written; committed tasks remain available. Absent/disabled/failed integrations do not fail it. Explicit `plugin check` checks enabled external connections. `plugin list` returns installation/enabled metadata without configuration. `plugin config <id>` / RPC `plugin.config {id}` returns `{id,config}`, including while disabled. Neither read starts the provider or task service.
 
 Use identical `project`/`domain` parameters for scoped searches and reads. `--params` accepts a JSON object. Workspace, Slack, Linear, Orca, and GitHub share lifecycle rules; see their guides for capabilities.
 
@@ -278,3 +278,11 @@ Task creation and template application accept `process_preset` (a saved ID or `a
 In a `select` stage, `automation.report` requires an authorized `preset_id` and nonempty `selection_reason` for `pass`. A blocked report need not select. The executor handoff preserves these fields. Process exit remains a separate receipt. The task workflow's public `process` includes its frozen selected definition, candidate definitions, cursor, selector, and reason. Snapshot and JSON export include the `process_presets` library. See [automation](automation.md) for stage semantics and CLI commands.
 
 Automation control requests against an existing workflow require both `expected_revision` and `expected_automation_revision`. The CLI includes its session agent ID for task controls, preset selection, and task/template creation; the service validates assignment for controls. Backup restore rejects unresolved agent processes before replacing any automation state. Workflow revisions use a live monotonic watermark, including across repeated restores.
+
+## Snapshot polling and widget diagnostics
+
+`board.snapshot` accepts optional `if_sequence`. When it matches the current event sequence, the response contains `unchanged:true`, `event_sequence`, and `widget` without task or planning collections. Otherwise it returns the full board plus widget health. Clients should perform a full read periodically for time-derived values.
+
+`widget.status` returns cached publication health and per-destination results without filesystem reads. `widget.refresh` attempts publication immediately and returns the resulting health. Neither changes task revisions or creates events. Background maintenance retries failures every thirty seconds and refreshes healthy idle snapshots every five minutes.
+
+Tasks include nullable `completed_at`. It records the latest transition into Done, survives later edits, and clears when reopened. Schema 8 migration recovers known historical completion events; unknown dates remain null.

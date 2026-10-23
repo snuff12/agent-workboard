@@ -29,6 +29,7 @@ import Darwin
         try await githubErrorCodes()
         if let executable = ProcessInfo.processInfo.environment["WORKBOARD_BIN"], !executable.isEmpty {
             try await actualService(executable)
+            try await widgetSharingRecovery(executable)
             try await linearWorkflowAndDeletion(executable)
             try await connectionSwitchRecoveryAndPluginConfig(executable)
             try await githubActualHost(executable)
@@ -669,7 +670,59 @@ import Darwin
         print("✓ New York spring/fall DST and all-day events: title edits preserve original time zones and date strings")
         let reloaded = BoardStore(appearance: appearance); await reloaded.reload(force: true)
         try require(reloaded.tasks.count == 3 + foreignSchedules.count, "Tasks did not persist")
+        let snapshot = try await WorkboardClient().call("board.snapshot", configuration: appearance.connection)
+        let unchanged = try await WorkboardClient().call("board.snapshot", params: ["if_sequence": snapshot["event_sequence"]], configuration: appearance.connection)
+        try require(unchanged["unchanged"].bool == true && unchanged["tasks"] == .null, "Unchanged polling returned a full board")
+        await reloaded.reload()
+        try require(reloaded.tasks.count == store.tasks.count, "Conditional polling discarded existing tasks")
+        let failedDestination = directory.appendingPathComponent("blocked-widget")
+        _ = try await WorkboardClient().call("widget.configure", params: ["snapshot_path": .string(failedDestination.path)], configuration: appearance.connection)
+        try FileManager.default.removeItem(at: failedDestination)
+        try FileManager.default.createDirectory(at: failedDestination, withIntermediateDirectories: true)
+        _ = try await WorkboardClient().call("widget.refresh", configuration: appearance.connection)
+        await reloaded.reload()
+        try require(reloaded.widgetWarning != nil && reloaded.connectionError == nil && !reloaded.tasks.isEmpty, "Widget failure did not remain separate from saved tasks")
+        _ = try await WorkboardClient().call("widget.configure", params: ["snapshot_path": .null], configuration: appearance.connection)
+        await reloaded.reload()
+        try require(reloaded.widgetWarning == nil, "Widget recovery did not clear the warning")
+        print("✓ Conditional polling retains tasks; widget publication failures and recovery update the app warning")
         print("✓ Actual Rust service: projects, parent/subtasks, deadlines/meetings, today’s schedule, runs, history, attachments, completion, and reload verified")
+    }
+    @MainActor static func widgetSharingRecovery(_ executable: String) async throws {
+        let directory = URL(fileURLWithPath: "/tmp/wbwidget-\(UUID().uuidString.prefix(8))")
+        let suite = "workboard-widget-tests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { throw Failure(description: "No test defaults") }
+        let service = try await startService(executable, directory: directory)
+        defer { if service.isRunning { service.terminate() }; service.waitUntilExit(); defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let client = WorkboardClient()
+        let connection = ConnectionConfiguration(executablePath: executable, dataDirectory: directory.path, sharesWidgetSnapshot: false)
+        let appearance = AppearanceSettings(defaults: defaults, sharesWidgetSettings: true)
+        appearance.executablePath = executable; appearance.dataDirectory = directory.path
+        var container: URL? = nil
+        let store = BoardStore(appearance: appearance, widgetContainer: { container })
+        await store.reload()
+        try require(store.connectionError == nil && store.widgetWarning?.contains("shared folder is unavailable") == true, "Missing App Group access was hidden by a healthy private snapshot")
+        container = directory.appendingPathComponent("shared")
+        await store.reload()
+        let configured = try await client.call("widget.status", configuration: connection)
+        try require(configured["configured"].bool == true && store.widgetWarning == nil, "Restored container access did not reconnect widget sharing")
+        let sequence = configured["event_sequence"]
+        await store.reload()
+        let idle = try await client.call("widget.status", configuration: connection)
+        try require(idle["event_sequence"] == sequence, "Healthy sharing was reconfigured on every poll")
+        _ = try await client.call("widget.configure", params: ["snapshot_path": .null], configuration: connection)
+        await store.reload()
+        let recovered = try await client.call("widget.status", configuration: connection)
+        try require(recovered["configured"].bool == true && store.widgetWarning == nil, "Clearing shared configuration did not invalidate the cached key and reconnect")
+        container = nil
+        await store.reload()
+        try require(store.widgetWarning?.contains("shared folder is unavailable") == true, "Lost App Group access was hidden by cached configuration")
+        _ = try await client.call("widget.configure", params: ["snapshot_path": .null], configuration: connection)
+        let isolatedAppearance = AppearanceSettings(defaults: defaults)
+        let isolated = BoardStore(appearance: isolatedAppearance, widgetContainer: { nil })
+        await isolated.reload()
+        try require(isolated.connectionError == nil && isolated.widgetWarning == nil, "Intentionally disabled sharing produced a configuration warning")
+        print("✓ Widget sharing: missing/restored container, cleared configuration, cached polling, and intentional isolation")
     }
     @MainActor static func linearWorkflowAndDeletion(_ executable: String) async throws {
         let directory = URL(fileURLWithPath: "/tmp/wbdel-\(UUID().uuidString.prefix(8))")

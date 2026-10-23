@@ -12,10 +12,12 @@ use std::{
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 7;
+pub const DATABASE_VERSION: u32 = 8;
 
 mod automation;
+mod completion;
 mod trash;
+mod widget;
 mod workflow;
 pub use workflow::ChecklistItem;
 
@@ -121,6 +123,9 @@ pub struct Task {
     pub revision: i64,
     pub created_at: String,
     pub updated_at: String,
+    /// The most recent transition to Done; ordinary edits never change it.
+    #[serde(default)]
+    pub completed_at: Option<String>,
     pub blocked_reason: String,
     pub completion_summary: String,
     pub claimed_at: Option<String>,
@@ -385,6 +390,7 @@ pub struct Board {
     conn: Connection,
     data_dir: PathBuf,
     widget_changed: std::cell::Cell<bool>,
+    widget_publication: std::cell::RefCell<widget::Publication>,
 }
 impl Board {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self, ApiError> {
@@ -410,6 +416,7 @@ impl Board {
             conn,
             data_dir,
             widget_changed: std::cell::Cell::new(false),
+            widget_publication: std::cell::RefCell::new(widget::Publication::default()),
         };
         if let Err(e) = board.write_widget_snapshot() {
             eprintln!("widget snapshot: {e}");
@@ -461,6 +468,37 @@ impl Board {
             return Ok(serde_json::from_str(&response)?);
         }
         match r.method.as_str() {
+            "doctor" => {
+                let mut health = read_method(&self.conn, "doctor", &r.params)?;
+                let widget = self.widget_status()?;
+                health["core_healthy"] = health["healthy"].clone();
+                health["healthy"] = widget["healthy"].clone();
+                health["status"] = json!(if widget["healthy"] == false {
+                    "degraded"
+                } else {
+                    "ok"
+                });
+                health["widget"] = widget;
+                return Ok(health);
+            }
+            "widget.status" => return self.widget_status(),
+            "widget.refresh" => {
+                if let Err(error) = self.write_widget_snapshot() {
+                    eprintln!("widget snapshot: {error}");
+                }
+                return self.widget_status();
+            }
+            "board.snapshot" => {
+                let current = sequence(&self.conn)?;
+                let mut state =
+                    if r.params.get("if_sequence").and_then(Value::as_i64) == Some(current) {
+                        json!({"unchanged":true,"event_sequence":current})
+                    } else {
+                        snapshot(&self.conn)?
+                    };
+                state["widget"] = self.widget_status()?;
+                return Ok(state);
+            }
             "backup.create" => {
                 let path = PathBuf::from(required(&r.params, "path")?);
                 let v = self.backup_request(&path, r, &fingerprint)?;
@@ -501,74 +539,6 @@ impl Board {
             eprintln!("widget snapshot: {e}");
         }
         Ok(value)
-    }
-    pub fn write_widget_snapshot(&self) -> Result<(), ApiError> {
-        let state = snapshot(&self.conn)?;
-        let tasks = state["tasks"].as_array().cloned().unwrap_or_default();
-        let select = |s: &str| {
-            tasks
-                .iter()
-                .filter(|t| t["status"] == s)
-                .take(12)
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let value = json!({"schema_version":1,"generated_at":now(),"event_sequence":state["event_sequence"],"projects":state["projects"],"tasks":tasks,"current":select("in_progress"),"next":select("todo"),"review":select("review"),"templates":state["templates"],"views":state["views"],"inbox":state["inbox"]});
-        let bytes = serde_json::to_vec(&value)?;
-        let mut paths =
-            std::collections::BTreeSet::from([self.data_dir.join("widget-snapshot.json")]);
-        let mut first_error = None;
-        if let Some(path) = std::env::var_os("WORKBOARD_WIDGET_SNAPSHOT") {
-            match validate_widget_path(&self.data_dir, Path::new(&path)) {
-                Ok(path) => {
-                    paths.insert(path);
-                }
-                Err(error) => first_error = Some(error),
-            }
-        }
-        let configured: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT value FROM settings WHERE key='widget_snapshot_path'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(configured) = configured {
-            let path = serde_json::from_str::<PathBuf>(&configured)
-                .map_err(ApiError::from)
-                .and_then(|path| validate_widget_path(&self.data_dir, &path));
-            match path {
-                Ok(path) => {
-                    paths.insert(path);
-                }
-                Err(error) => {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
-            }
-        }
-        for path in paths {
-            #[cfg(target_os = "macos")]
-            group_container::approve(&path);
-            match atomic_write(&path, &bytes) {
-                #[cfg(target_os = "macos")]
-                Ok(()) if group_container::identifier(&path).is_some() => {
-                    self.widget_changed.set(true)
-                }
-                Ok(()) => {}
-                Err(error) => {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
-            }
-        }
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-        Ok(())
     }
     fn backup_request(
         &self,
@@ -729,7 +699,7 @@ impl Board {
             tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM automations; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
             for (table,columns) in [
                 ("projects","id,name,directory,created_at"),
-                ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by"),
+                ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by,completed_at"),
                 ("runs","id,task_id,agent_id,status,started_at,ended_at,summary,next_action"),
                 ("artifacts","id,task_id,run_id,path,kind,description,created_at,locator,provider,verified_at,metadata"),
                 ("task_dependencies","task_id,depends_on_id"),
@@ -907,6 +877,9 @@ COMMIT;
     if version < 7 {
         automation::migrate(conn)?;
     }
+    if version < 8 {
+        completion::migrate(conn)?;
+    }
     Ok(())
 }
 
@@ -1040,7 +1013,7 @@ fn record(
     c.execute("INSERT INTO events(request_id,task_id,kind,actor,created_at,data) VALUES (?1,?2,?3,?4,?5,?6)",params![r.request_id,task,kind,actor,now(),serde_json::to_string(&data)?])?;
     Ok(c.last_insert_rowid())
 }
-const TASK_SELECT: &str = "SELECT id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by FROM tasks";
+const TASK_SELECT: &str = "SELECT id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by,completed_at FROM tasks";
 fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let claimed_at: Option<String> = r.get(15)?;
     let expires = claimed_at
@@ -1063,6 +1036,7 @@ fn task_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         revision: r.get(10)?,
         created_at: r.get(11)?,
         updated_at: r.get(12)?,
+        completed_at: r.get(23)?,
         blocked_reason: r.get(13)?,
         completion_summary: r.get(14)?,
         claimed_at,
@@ -1548,6 +1522,7 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             updated_at: timestamp,
             blocked_reason: String::new(),
             completion_summary: String::new(),
+            completed_at: None,
             claimed_at: None,
             claim_expires_at: None,
             claim_stale: false,

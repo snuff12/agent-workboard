@@ -12,6 +12,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 CLI = ROOT / "target/debug/workboard"
 SERVICE = ROOT / "target/debug/workboard-service"
+# One worker may take 40 seconds; a complete flow can execute six stages.
+STEP_WAIT = 60
+WORKFLOW_WAIT = 300
 
 ORCA = r'''#!__PYTHON__
 import json
@@ -54,8 +57,9 @@ mode=(state/"mode").read_text() if (state/"mode").exists() else "normal"
 if mode=="exit": sys.exit(0)
 if mode=="hold":
     (state/"waiting").touch()
-    for _ in range(500):
-        if (state/"continue").exists(): break
+    deadline=time.monotonic()+300
+    while not (state/"continue").exists():
+        if time.monotonic()>=deadline: raise RuntimeError("Fixture continuation signal was not received")
         time.sleep(.02)
 task=os.environ["WORKBOARD_AUTOMATION_TASK"]
 response=subprocess.check_output([cli,"automation","show",task,"--json"])
@@ -133,7 +137,7 @@ class AutomationTests(unittest.TestCase):
     def workflow(self):
         return self.cli("automation", "show", self.task)["automation"]
 
-    def wait(self, predicate, timeout=25):
+    def wait(self, predicate, timeout=STEP_WAIT):
         started = time.monotonic()
         while time.monotonic() - started < timeout:
             if predicate():
@@ -150,7 +154,7 @@ class AutomationTests(unittest.TestCase):
                  "--params", json.dumps({"worktree_id": "repo::" + str(self.repo), "agent": "codex"}),
                  "--process-preset", "auto", "--allowed-presets", "small,standard")
         self.cli("automation", "start", self.task)
-        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"))
+        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"), timeout=WORKFLOW_WAIT)
         workflow = self.workflow()
         self.assertEqual(workflow["state"], "awaiting_approval", workflow["message"])
         self.assertEqual(workflow["process"]["preset"]["id"], "small")
@@ -228,7 +232,7 @@ class AutomationTests(unittest.TestCase):
         self.assertFalse((self.directory / "calls").exists(), "An armed workflow must not invoke the executor")
         revision = self.cli("task", "show", self.task)["task"]["revision"]
         self.cli("task", "start", self.task, "--agent", "user", "--expected-revision", str(revision))
-        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"))
+        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"), timeout=WORKFLOW_WAIT)
         workflow = self.workflow()
         self.assertEqual(workflow["state"], "awaiting_approval", workflow["message"])
         self.assertEqual([entry["stage"] for entry in workflow["attempts"]], ["preflight", "work", "review", "rework", "review", "release"])
@@ -328,7 +332,7 @@ class AutomationTests(unittest.TestCase):
         self.assertEqual(self.launches(), 1)
         (self.directory / "mode").write_text("normal")
         self.cli("automation", "resume", self.task)
-        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"))
+        self.wait(lambda: self.workflow()["state"] in ("awaiting_approval", "blocked"), timeout=WORKFLOW_WAIT)
         self.assertEqual(self.workflow()["state"], "awaiting_approval")
         self.assertEqual(self.launches(), 6)
 

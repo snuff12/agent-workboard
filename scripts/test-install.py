@@ -7,6 +7,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import signal
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -20,12 +21,23 @@ class Installer(unittest.TestCase):
     def setUpClass(cls):
         cls.shared = tempfile.TemporaryDirectory(prefix="awbisrc-", dir="/tmp")
         cls.source = Path(cls.shared.name) / "source.app"
-        seed = Path(os.environ.get("WORKBOARD_INSTALL_TEST_APP", ROOT / ".build/install-check/Applications/Agent Workboard.app"))
-        if not seed.is_dir():
-            seed = ROOT / "dist/Agent Workboard.app"
-        subprocess.run(["ditto", str(seed), str(cls.source)], check=True)
+        seed = os.environ.get("WORKBOARD_INSTALL_TEST_APP")
+        if seed:
+            subprocess.run(["ditto", seed, str(cls.source)], check=True)
+        else:
+            # Signing and bundle replacement need a valid app, not a running GUI.
+            # Build a minimal fixture so this suite also runs on a clean checkout.
+            (cls.source / "Contents/MacOS").mkdir(parents=True)
+            (cls.source / "Contents/Resources").mkdir()
+            (cls.source / "Contents/Helpers").mkdir()
+            with (cls.source / "Contents/Info.plist").open("wb") as output:
+                plistlib.dump({"CFBundleIdentifier": "local.agentworkboard.install-tests",
+                    "CFBundleExecutable": "WorkboardApp", "CFBundlePackageType": "APPL",
+                    "CFBundleVersion": "1", "CFBundleName": "Agent Workboard"}, output)
         helpers = cls.source / "Contents/Helpers"
         subprocess.run(["xcrun", "clang", "-Wall", "-Wextra", "-Werror", "-O2", str(ROOT / "scripts/install-lock.c"), "-o", str(helpers / "workboard-install-lock")], check=True)
+        if not seed:
+            shutil.copy2(helpers / "workboard-install-lock", cls.source / "Contents/MacOS/WorkboardApp")
         for name in ("workboard", "workboard-service"):
             shutil.copy2(ROOT / "target/debug" / name, helpers / name)
         for name in ("workboard", "workboard-service", "workboard-install-lock"):
@@ -51,7 +63,7 @@ class Installer(unittest.TestCase):
         tools.mkdir()
         launchctl = tools / "launchctl"
         launchctl.write_text('''#!/usr/bin/env python3
-import json, os, pathlib, plistlib, signal, subprocess, sys
+import json, os, pathlib, plistlib, signal, socket, subprocess, sys, time, uuid
 state = pathlib.Path(os.environ["WORKBOARD_INSTALL_TEST_STATE"])
 if sys.argv[1] == "print":
     if not state.exists(): sys.exit(113)
@@ -70,13 +82,36 @@ elif sys.argv[1] == "bootstrap":
     process = subprocess.Popen(config["ProgramArguments"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, start_new_session=True, env={**os.environ, **config.get("EnvironmentVariables", {})})
     state.write_text(json.dumps({"pid": process.pid, "program": config["ProgramArguments"][0]}))
+    failure = state.with_suffix(".failed")
+    if os.environ.get("WORKBOARD_INSTALL_FAIL_AFTER_START") == "1" and not failure.exists():
+        endpoint = config["ProgramArguments"][4]
+        def rpc(method, params):
+            with socket.socket(socket.AF_UNIX) as connection:
+                connection.settimeout(10)
+                connection.connect(endpoint)
+                request = {"schema_version": 1, "request_id": str(uuid.uuid4()), "method": method, "params": params}
+                connection.sendall((json.dumps(request) + "\\n").encode())
+                response = connection.makefile("rb").readline()
+                result = json.loads(response)
+                if not result["ok"]: raise RuntimeError(result)
+                return result["result"]
+        for attempt in range(200):
+            try:
+                health = rpc("doctor", {})
+                break
+            except OSError: time.sleep(0.1)
+        else: raise RuntimeError("New service did not become ready")
+        project = rpc("project.list", {})["projects"][0]["id"]
+        rpc("task.create", {"project_id": project, "title": "Accepted after migration"})
+        failure.write_text(json.dumps(health))
+        sys.exit(81)
 else: sys.exit(2)
 ''')
         launchctl.chmod(0o755)
         register = tools / "lsregister"
         register.write_text('#!/bin/sh\nif [ "${WORKBOARD_INSTALL_REGISTER_FAIL:-0}" = 1 ]; then exit 82; fi\nexit 0\n')
         register.chmod(0o755)
-        self.environment = {**os.environ, "PATH": str(tools) + ":" + os.environ["PATH"],
+        self.environment = {**{key: value for key, value in os.environ.items() if not key.startswith("WORKBOARD_")}, "PATH": str(tools) + ":" + os.environ["PATH"],
                             "WORKBOARD_INSTALL_TEST_STATE": str(self.state)}
         self.environment.pop("WORKBOARD_DATA_DIR", None)
         self.environment.pop("WORKBOARD_SOCKET", None)
@@ -101,7 +136,7 @@ else: sys.exit(2)
             "--destination", str(self.destination), "--bin-dir", str(self.bin), "--data-dir", str(self.data),
             "--socket", str(self.socket), "--service-label", self.label, "--agent-dir", str(self.agents),
             "--log-dir", str(self.base / "logs"), *extra]
-        result = subprocess.run(command, env=env or self.environment, capture_output=True, text=True, timeout=45)
+        result = subprocess.run(command, env=env or self.environment, capture_output=True, text=True, timeout=120)
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -111,7 +146,7 @@ else: sys.exit(2)
     def start_manual(self, binary=None):
         binary = binary or self.source / "Contents/Helpers/workboard-service"
         process = subprocess.Popen([str(binary), "--data-dir", str(self.data), "--socket", str(self.socket)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=self.environment)
         self.processes.append(process)
         self.wait_socket()
         return process
@@ -202,14 +237,41 @@ else: sys.exit(2)
         self.assertFalse(self.state.exists())
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(self.app)], check=True)
 
-    def test_bootstrap_failure_restores_previous_service(self):
+    def test_bootstrap_failure_keeps_compatible_app_and_recovers_manual_access(self):
         self.install("--skip-register")
         old = self.start_manual(self.app / "Contents/Helpers/workboard-service")
-        self.install("--start-service", "--skip-register", env={**self.environment, "WORKBOARD_INSTALL_BOOTSTRAP_FAIL": "1"}, success=False)
+        result = self.install("--start-service", "--skip-register", env={**self.environment, "WORKBOARD_INSTALL_BOOTSTRAP_FAIL": "1"}, success=False)
         old.wait(timeout=5)
         self.wait_socket()
         self.assertTrue(self.rpc("doctor", {})["healthy"])
-        self.assertFalse((self.agents / (self.label + ".plist")).exists())
+        self.assertTrue((self.agents / (self.label + ".plist")).exists())
+        self.assertIn("automatic downgrade is unsafe", result.stderr)
+        self.assertTrue(list(self.destination.glob(".workboard-install.*/previous.app")))
+
+    def test_failure_after_migration_preserves_new_app_and_new_writes(self):
+        self.install("--skip-register")
+        marker = self.app / "Contents/Resources/previous-marker"
+        marker.write_text("previous")
+        subprocess.run(["codesign", "--force", "--sign", "-", str(self.app)], check=True, capture_output=True)
+        old = self.start_manual(self.app / "Contents/Helpers/workboard-service")
+        project = self.rpc("project.create", {"name": "Upgrade recovery"})["project_id"]
+        self.rpc("task.create", {"project_id": project, "title": "Present before migration"})
+        old.terminate()
+        old.wait(timeout=10)
+        # Reconstruct the previous schema only in this stopped, disposable fixture.
+        with sqlite3.connect(self.data / "workboard.sqlite3") as database:
+            database.executescript("DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;")
+        result = self.install("--start-service", "--skip-register",
+            env={**self.environment, "WORKBOARD_INSTALL_FAIL_AFTER_START": "1"}, success=False)
+        self.assertEqual(json.loads(self.state.with_suffix(".failed").read_text())["database_version"], 8)
+        self.assertFalse(marker.exists(), "An old app was restored over the migrated database")
+        self.assertIn("The new task service is healthy", result.stderr)
+        self.assertEqual({task["title"] for task in self.rpc("task.list", {})["tasks"]},
+                         {"Present before migration", "Accepted after migration"})
+        archives = list(self.destination.glob(".workboard-install.*/previous.app/Contents/Resources/previous-marker"))
+        self.assertEqual(len(archives), 1, "The previous app recovery copy was discarded")
+        self.install("--start-service", "--skip-register")
+        self.assertEqual(len(self.rpc("task.list", {})["tasks"]), 2)
 
     def test_unrecognized_service_path_is_not_signalled(self):
         foreign = self.base / "foreign/workboard-service"

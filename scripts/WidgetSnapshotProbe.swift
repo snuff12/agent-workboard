@@ -28,6 +28,11 @@ struct WidgetSnapshotProbe {
         } catch WidgetSnapshot.SnapshotError.unsupportedVersion { }
         let empty = try WidgetSnapshot.decode(Data("{\"schema_version\":1,\"event_sequence\":0,\"generated_at\":\"2026-10-15T00:00:00Z\",\"tasks\":[]}".utf8))
         precondition(empty.tasks(for: .now).isEmpty)
+        var idle = snapshot
+        idle.checkedAt = snapshot.generatedAt.addingTimeInterval(24 * 3600)
+        precondition(!idle.isStale(at: idle.lastCheckedAt.addingTimeInterval(899)), "An idle healthy board remains connected")
+        precondition(idle.isStale(at: idle.lastCheckedAt.addingTimeInterval(900)), "A stopped service becomes disconnected")
+        precondition(idle.generatedAt == snapshot.generatedAt, "A heartbeat must not rewrite data-change time")
         try todaySummary()
         if CommandLine.arguments.count > 1 {
             let actual = try WidgetSnapshot.decode(Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
@@ -52,8 +57,8 @@ struct WidgetSnapshotProbe {
           {"id":"undated","title":"No date","status":"todo","priority":3,"updated_at":"2026-10-01T00:00:00Z","project_id":"p"},
           {"id":"parked-today","title":"Backlog due today","status":"backlog","priority":0,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","due_at":"2026-10-15T20:00:00+09:00"},
           {"id":"canceled-overdue","title":"Canceled after its deadline","status":"canceled","priority":0,"updated_at":"2026-10-01T00:00:00Z","project_id":"p","due_at":"2026-10-14"},
-          {"id":"done-today","title":"Completed today","status":"done","priority":0,"updated_at":"2026-10-15T00:30:00Z","project_id":"p"},
-          {"id":"done-yesterday","title":"Completed yesterday","status":"done","priority":0,"updated_at":"2026-10-14T14:59:00Z","project_id":"p"}
+          {"id":"done-today","title":"Completed today","status":"done","priority":0,"completed_at":"2026-10-15T00:30:00Z","updated_at":"2026-10-15T06:00:00Z","project_id":"p"},
+          {"id":"done-yesterday","title":"Edited today, completed yesterday","status":"done","priority":0,"completed_at":"2026-10-14T14:59:00Z","updated_at":"2026-10-15T06:00:00Z","project_id":"p"}
         ]}
         """
         let snapshot = try WidgetSnapshot.decode(Data(fixture.utf8))

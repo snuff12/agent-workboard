@@ -84,6 +84,7 @@ struct BoardTask: Identifiable, Sendable, Hashable {
     let timeZone: String
     let revision: Int
     let updatedAt: String
+    let completedAt: String?
     init?(_ json: JSONValue) {
         guard let id = json["id"].string, let projectID = json["project_id"].string else { return nil }
         self.id = id; self.projectID = projectID; parentID = json["parent_id"].string
@@ -97,6 +98,7 @@ struct BoardTask: Identifiable, Sendable, Hashable {
         checklist = json["checklist"].array.compactMap(ChecklistItem.init)
         dueAt = json["due_at"].string; scheduledStart = json["scheduled_start"].string; scheduledEnd = json["scheduled_end"].string; timeZone = json["time_zone"].string ?? TimeZone.current.identifier
         updatedAt = json["updated_at"].string ?? ""
+        completedAt = json["completed_at"].string
     }
     var priorityTitle: String { priority >= 3 ? "High" : priority >= 1 ? "Normal" : "Low" }
     var isBlocked: Bool { !blockedBy.isEmpty || !blockedReason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }

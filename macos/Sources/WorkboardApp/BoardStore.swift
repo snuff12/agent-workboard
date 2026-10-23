@@ -47,8 +47,10 @@ import Combine
     private let client = WorkboardClient()
     private var reloading = false
     private var eventSequence: Int?
+    private var lastFullReload: Date?
     private var pendingDeepLink: String?
     private var widgetConfigurationKey: String?
+    private let widgetContainer: () -> URL?
     private var connectionIdentity: ConnectionIdentity?
     private var connectionGeneration = UUID()
     private var connectionObservation: AnyCancellable?
@@ -56,8 +58,11 @@ import Combine
     @Published private var queryResultIDs: Set<String>?
     private var queryResultKey: String?
 
-    init(appearance: AppearanceSettings) {
+    init(appearance: AppearanceSettings, widgetContainer: @escaping () -> URL? = {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: WorkboardAppGroup.identifier)
+    }) {
         self.appearance = appearance
+        self.widgetContainer = widgetContainer
         connectionObservation = appearance.connectionChanges.sink { [weak self] in
             guard let self, self.invalidateConnectionIfNeeded() else { return }
             if self.reloading { self.reloadRequested = true }
@@ -111,7 +116,7 @@ import Combine
         guard identity != connectionIdentity else { return false }
         if connectionIdentity != nil { pendingDeepLink = nil }
         connectionIdentity = identity; connectionGeneration = UUID()
-        eventSequence = nil; widgetConfigurationKey = nil; lastUpdated = nil
+        eventSequence = nil; lastFullReload = nil; widgetConfigurationKey = nil; lastUpdated = nil
         projects = []; tasks = []; automations = [:]; automationDefaults = [:]; processPresets = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
         templates = []; savedViews = []; inbox = []; trash = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
         queryResultIDs = nil; queryResultKey = nil
@@ -139,10 +144,16 @@ import Combine
             } else { isLoading = false }
         }
         do {
-            let snapshot = try await client.call("board.snapshot", configuration: configuration)
+            var parameters: [String: JSONValue] = [:]
+            // Periodic full reads also refresh time-derived values such as expired claims.
+            if !force, let eventSequence, let lastFullReload, Date().timeIntervalSince(lastFullReload) < 60 {
+                parameters["if_sequence"] = .number(Double(eventSequence))
+            }
+            let snapshot = try await client.call("board.snapshot", params: parameters, configuration: configuration)
             guard isCurrentConnection(identity, generation: generation) else { reloadRequested = true; return }
             let sequence = snapshot["event_sequence"].int
-            if sequence != eventSequence || force || lastUpdated == nil {
+            if snapshot["unchanged"].bool != true {
+                lastFullReload = Date()
                 projects = snapshot["projects"].array.compactMap(BoardProject.init)
                 tasks = snapshot["tasks"].array.compactMap(BoardTask.init)
                 automations = Dictionary(uniqueKeysWithValues: snapshot["automations"].array.compactMap(TaskAutomation.init).map { ($0.taskID, $0) })
@@ -170,6 +181,7 @@ import Combine
                 eventSequence = sequence
             }
             connectionError = nil; lastUpdated = Date()
+            updateWidgetWarning(snapshot["widget"])
             await refreshQueryResults()
             guard isCurrentConnection(identity, generation: generation) else { reloadRequested = true; return }
             await configureWidgetIfNeeded(configuration: configuration, identity: identity, generation: generation)
@@ -193,17 +205,34 @@ import Combine
         }
     }
     private func configureWidgetIfNeeded(configuration: ConnectionConfiguration, identity: ConnectionIdentity, generation: UUID) async {
-        guard isCurrentConnection(identity, generation: generation), configuration.sharesWidgetSnapshot,
-              let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: WorkboardAppGroup.identifier) else { return }
+        guard isCurrentConnection(identity, generation: generation), configuration.sharesWidgetSnapshot else { return }
+        guard let container = widgetContainer() else {
+            widgetConfigurationKey = nil
+            widgetWarning = "Tasks are saved, but the desktop widget's shared folder is unavailable. Check the app's signing and App Group access."
+            return
+        }
         let snapshotPath = container.appendingPathComponent("widget-snapshot.json").path
         let key = [identity.executable, identity.dataDirectory, identity.socket, snapshotPath].joined(separator: "\n")
         guard key != widgetConfigurationKey else { return }
         do {
             _ = try await client.call("widget.configure", params: ["snapshot_path": .string(snapshotPath)], configuration: configuration)
             guard isCurrentConnection(identity, generation: generation) else { return }
-            widgetConfigurationKey = key
-            widgetWarning = nil; WidgetCenter.shared.reloadAllTimelines()
+            let status = try await client.call("widget.status", configuration: configuration)
+            guard isCurrentConnection(identity, generation: generation) else { return }
+            widgetConfigurationKey = status["configured"].bool == true ? key : nil
+            updateWidgetWarning(status); WidgetCenter.shared.reloadAllTimelines()
         } catch { if isCurrentConnection(identity, generation: generation) { widgetWarning = "Could not configure the shared widget location. \(error.localizedDescription)" } }
+    }
+    private func updateWidgetWarning(_ status: JSONValue) {
+        guard status != .null else { return }
+        if appearance.sharesWidgetSettings && status["configured"].bool == false {
+            widgetConfigurationKey = nil
+            widgetWarning = "Tasks are saved, but desktop widget sharing is not configured. The app will try to reconnect the shared folder."
+            return
+        }
+        widgetWarning = status["healthy"].bool == false
+            ? "Tasks are saved, but the desktop widget could not update. Check the app's signing and shared container access. The service will retry automatically."
+            : nil
     }
     func poll() async {
         while !Task.isCancelled {

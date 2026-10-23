@@ -250,7 +250,9 @@ from pathlib import Path
 state=Path(os.environ["WORKBOARD_PLUGIN_DATA_DIR"])
 state.mkdir(parents=True,exist_ok=True)
 child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(30)"])
-(state/"started").write_text(json.dumps({"pid":os.getpid(),"child":child.pid}))
+marker=state/"started.tmp"
+marker.write_text(json.dumps({"pid":os.getpid(),"child":child.pid}))
+marker.replace(state/"started")
 time.sleep(30)
 ''', methods=["hang"], timeout=20)
         self.install(package)

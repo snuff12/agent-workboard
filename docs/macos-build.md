@@ -36,7 +36,7 @@ This registers a current-user LaunchAgent, not a system service. `ProcessType=St
 
 The installer holds exclusive `install.lock`; CLI automatic startup obtains a shared lock before launching, preventing an old service from racing an update. Manual-service takeover validates a single PID holding the chosen `service.lock` and exact socket, its UID, and a product-managed executable. Send SIGTERM only to the verified process and wait for lock/socket release. Do not stop services at other paths. Existing LaunchAgents must match app, data, and socket configuration.
 
-Stage a complete app copy and verify signatures before replacement, including same-source/destination installs. On link/registration/start failure, restore previous app/links/LaunchAgent and restart the previous service. Do not delete/move the database. Verify the new service directly through the socket and doctor without CLI autostart. KeepAlive retries use a 30-second throttle.
+Stage a complete app copy and verify signatures before replacement, including same-source/destination installs. Failures before attempting new service startup restore the previous app, links, LaunchAgent, and service. Once startup has been attempted, the service may already have migrated SQLite or accepted new writes: retain the new app, links, LaunchAgent, and database together. Preserve the previous app and installation files in the reported recovery directory. Retry registration, or recover access with the new executable when registration fails and no verified writer exists. Report health without converting the failed installation into success; rerun with the same options to finish. Never automatically downgrade the executable or restore an older database after this boundary. Verify the new service directly through the socket and doctor without CLI autostart. KeepAlive retries use a 30-second throttle.
 
 Disable automatic startup while preserving app/data:
 
@@ -128,7 +128,7 @@ scripts/verify-widget.sh "/path/to/widget-snapshot.json"
 python3 scripts/test-install.py
 ```
 
-Installer checks use separate `/tmp` data/apps, short sockets, and unique service names. They do not change HOME or the default service. launchctl/LaunchServices are simulated, so these tests do not prove actual login registration. Service processes, SQLite, code signing, sockets, and install locking are real. Cover manual takeover/data preservation, managed updates, same-source installs, registration/bootstrap rollback, foreign-service protection, and CLI lock waiting.
+Installer checks use separate `/tmp` data/apps, short sockets, and unique service names. They do not change HOME or the default service. launchctl/LaunchServices are simulated, so these tests do not prove actual login registration. Service processes, SQLite, code signing, sockets, and install locking are real. Cover manual takeover/data preservation, managed updates, same-source installs, pre-start registration rollback, failed bootstrap recovery, failure after schema migration with new writes, foreign-service protection, and CLI lock waiting. The default fixture builds a minimal signed app bundle with real CLI/service executables; set `WORKBOARD_INSTALL_TEST_APP` to test a specific built app copy. This does not exercise the native GUI or actual login registration.
 
 For isolated development use `--data-dir DIR --socket PATH --service-label local.agentworkboard.test.NAME --agent-dir DIR --log-dir DIR`; ordinary installs need no overrides. Do not overwrite the default group snapshot from an isolated board.
 

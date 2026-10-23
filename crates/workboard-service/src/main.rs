@@ -120,7 +120,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     eprintln!("workboard-service ready: {}", socket.display());
     let mut clients = Vec::new();
+    let mut widget_check = Instant::now();
     while running.load(Ordering::SeqCst) {
+        if widget_check.elapsed() >= Duration::from_secs(5) {
+            if let Ok(board) = board.try_lock() {
+                board.maintain_widget();
+                if board.take_widget_change() {
+                    reloader.request();
+                }
+            }
+            widget_check = Instant::now();
+        }
         match listener.accept() {
             Ok((stream, _)) => {
                 let accepted = Instant::now();
