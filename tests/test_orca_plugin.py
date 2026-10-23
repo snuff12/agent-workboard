@@ -16,6 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins/orca/plugin.py"
 CLI = ROOT / "target/debug/workboard"
 SERVICE = ROOT / "target/debug/workboard-service"
+# A provider may use its complete 24-second budget across several Orca calls.
+# The harness must allow it to return its own typed timeout instead of killing it first.
+PROVIDER_WAIT = 35
+HOST_WAIT = 45
 
 FAKE = r'''#!__PYTHON__
 import json
@@ -93,7 +97,7 @@ class Fixture(unittest.TestCase):
     def invoke(self, method, params=None, request_id="request-1", config=None):
         result = subprocess.run([sys.executable, str(PLUGIN)], input=json.dumps({"protocol_version": 1,
             "request_id": request_id, "method": method, "params": params or {}, "config": config or self.config}),
-            text=True, capture_output=True, env=self.environment, timeout=8)
+            text=True, capture_output=True, env=self.environment, timeout=PROVIDER_WAIT)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -254,7 +258,7 @@ class OrcaHost(Fixture):
         self.server = subprocess.Popen([str(SERVICE), "--data-dir", str(self.data), "--socket", str(self.socket)],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop)
-        deadline = time.monotonic() + 6
+        deadline = time.monotonic() + 20
         while not self.socket.exists():
             self.assertIsNone(self.server.poll())
             self.assertLess(time.monotonic(), deadline)
@@ -269,7 +273,7 @@ class OrcaHost(Fixture):
 
     def cli(self, *args, ok=True):
         completed = subprocess.run([str(CLI), "--json", "--data-dir", str(self.data), "--socket", str(self.socket), *args],
-                                   capture_output=True, text=True, timeout=10)
+                                   capture_output=True, text=True, timeout=HOST_WAIT)
         result = json.loads(completed.stdout)
         self.assertEqual(result["ok"], ok, result)
         self.assertEqual(completed.returncode == 0, ok)

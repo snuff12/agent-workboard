@@ -2,6 +2,42 @@
 
 This record distinguishes automated checks, offscreen rendering, native app interactions, actual desktop widgets, and real external accounts. Historical counts below describe their respective builds, not interchangeable proof of every later change.
 
+## October 23 review follow-up
+
+The second review reproduced an upgrade from schema 7 to 8 followed by the previous service refusing the database. Installer recovery now has an explicit boundary: failures before new service startup retain ordinary rollback; after any new startup attempt, keep the new app, links, LaunchAgent, and database together. Preserve the previous app in the reported recovery directory. Retry registration or recover core access with the new executable without restoring an older database. Verify the exact executable and core health before reporting recovery, and retain the failure exit code so the user can finish installation by retrying.
+
+The app now reports unavailable App Group folders and missing shared configuration when widget sharing is enabled. Losing shared configuration invalidates the cached configuration key, so the next reload reconnects it. Healthy polling does not repeatedly configure the widget, and intentionally isolated connections do not show a missing-configuration warning.
+
+Validation for these follow-up changes:
+
+- All nine installer tests passed in one run. They include forced failure after the actual schema migration and a new task write, preservation of both old and new tasks, preservation of the new app and previous app recovery copy, and successful installation retry. Pre-start rollback, failed bootstrap recovery, locking, managed/manual handover, and foreign-service protection also passed.
+- The Swift app-source test runner compiled and passed against actual isolated CLI/service processes. New checks cover missing/restored container access, clearing shared configuration after caching, unchanged polling without repeated configuration, and intentional isolation. Existing publication failure/recovery and connection-switch tests also passed.
+- Shell/Python syntax, whitespace, and the English-only check passed. Installer tests are now included in the macOS scope of the unified verification runner; their default signed fixture no longer needs an existing dist app.
+- Final source review found no additional blocking issues in the changed recovery and warning paths. It checked the migration boundary, new-write preservation, service identity, cached configuration, and connection-generation guards.
+
+Installer launchctl/LaunchServices behavior is simulated; bundles, signatures, service processes, sockets, and SQLite are real. App Group folder resolution is injected for the app failure/recovery tests. These checks do not prove real login registration or desktop WidgetKit hosting. The installed user app was not replaced and its database was not migrated. The full Rust/Python suite and remote CI were not rerun for this shell/Swift follow-up. Desktop widget hosting remains deferred by the user.
+
+## October 23 system improvements
+
+Schema 8 adds completion timestamps recovered from known historical transitions. Tests cover later edits, reopening, retry IDs, trash restoration, backups, and unknown historical dates. An interaction between the new completion trigger and the search index was found during regression testing and fixed by restricting index updates to indexed fields.
+
+| Behavior | Evidence |
+| --- | --- |
+| Unchanged board polling skips full collections | With 500 tasks, the new full response is 321,591 bytes and the unchanged response is 470 bytes, a 99.85% reduction. A full read still occurs at least once a minute. |
+| Compact widget publication | The same 500-task fixture produces 167,551 bytes, compared with 316,008 bytes in the installed baseline, a 46.98% reduction. |
+| Publication errors are observable without losing tasks | A blocked destination leaves the mutation successful and `core_healthy:true`, while doctor reports `healthy:false` and `status:degraded`. |
+| Automatic recovery and idle heartbeat | A real isolated service recovered 36.4 seconds after the destination was repaired. Its next idle heartbeat arrived after 300.25 seconds, preserving both data-change time and event sequence. |
+| Completion means a status transition | Completing a task and editing its title changes `updated_at` while preserving `completed_at`. The widget probe excludes a task completed yesterday and edited today. |
+| Repeatable checks | `scripts/verify.py` builds first and runs Rust, provider, Swift, widget, and English-only checks. The GitHub Actions workflow invokes the same runner; no remote run is claimed here. |
+
+All 119 Rust tests passed after the search-index fix (13 CLI, 102 core, 4 socket), along with formatting, clippy with warnings denied, and the English-only check. The Swift app build and actual-service app runner passed, including conditional polling retaining tasks, publication failure warnings, and warning recovery. Both WidgetKit variants compile and the snapshot probe passes.
+
+Python discovery initially passed 300 of 310 cases during concurrent builds. Nine cases timed out; one cancellation fixture read a partially written marker file. Atomic marker publication fixed that race. A targeted retry passed six of the ten failures. The remaining four automation flows, plus the revised held-agent fixture, then all passed. Every one of the 310 discovered cases has a passing result across these runs; this is not a claim that one clean full verification invocation passed.
+
+The same automation selection test hit its old 25-second wait on both the installed baseline and rebuilt service. Automation fixtures now distinguish a 60-second step observation window from a 300-second complete-flow window, covering the existing 40-second worker budget across multiple stages. Held fixture agents wait for an explicit continuation signal instead of advancing after ten seconds. The Orca suite passed all 19 cases after its outer fixture deadline was placed above the provider's existing request budget. Production execution limits and success assertions are unchanged. The verification runner executes checks sequentially and stops at the first failure. Remote CI, the standalone planner runner, and the standalone workflow runner were not executed for this change; app/service smoke coverage and the recorded checks above are the evidence for this build.
+
+Measurements use disposable databases and the actual socket protocol. The baseline is an installed optimized binary; the rebuilt service is a debug binary on a heavily loaded Mac. Byte-size comparisons are deterministic; elapsed times are observations, not a claimed production speedup. Actual desktop widget hosting was explicitly deferred by the user because full Xcode and a development signing identity are unavailable. No real external account operation is part of this verification. Source changes and isolated builds were verified; the installed user app and service were not replaced. A service-created pre-upgrade database backup is retained with the local evidence bundle.
+
 ## Review fixes after the October 16 merges
 
 A review of the merged Orca card links, Linear, GitHub, and trash changes found six issues, fixed together. Each was reproduced before the fix where it could be: another agent's permanent deletion of a trashed task, `codex execpolicy check` allowing `task update --status canceled`, and, in a temporary keychain, `security -i` failing on `O'Brien` and running a second command from a label with a newline.

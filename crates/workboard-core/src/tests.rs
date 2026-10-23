@@ -27,6 +27,155 @@ fn setup() -> (TempDir, Board, String, String) {
     let t=call(&mut board,"task.create",json!({"project_id":p,"title":"Build the kanban board","goal":"Check tasks","completion_criteria":"Actual tasks are visible"}))["task_id"].as_str().unwrap().to_string();
     (dir, board, p, t)
 }
+
+#[test]
+fn completion_time_survives_edits_trash_restore_and_backup() {
+    let (dir, mut b, _, task) = setup();
+    let completed = call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":1,"status":"done","completion_summary":"Verified"}),
+    );
+    let at = completed["task"]["completed_at"].clone();
+    assert!(at.is_string());
+    let edit = call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":completed["task"]["revision"],"title":"A later edit"}),
+    );
+    assert_eq!(edit["task"]["completed_at"], at);
+    call(&mut b, "task.delete", json!({"task_id":task}));
+    call(&mut b, "trash.restore", json!({"task_id":task}));
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":task}))["task"]["completed_at"],
+        at
+    );
+    let backup = dir.path().join("completion-backup.sqlite3");
+    call(&mut b, "backup.create", json!({"path":backup}));
+    let current = get_task(&b.conn, &task).unwrap();
+    let reopened = call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":current.revision,"status":"todo"}),
+    );
+    assert!(reopened["task"]["completed_at"].is_null());
+    let request = req(
+        "task.update",
+        json!({"task_id":task,"expected_revision":reopened["task"]["revision"],"status":"done","completion_summary":"Verified again"}),
+    );
+    let result = b.dispatch(request.clone());
+    assert!(result.ok);
+    assert_eq!(result.result, b.dispatch(request).result);
+    call(&mut b, "backup.restore", json!({"path":backup}));
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":task}))["task"]["completed_at"],
+        at
+    );
+}
+
+#[test]
+fn version_seven_recovers_completion_transitions_without_using_later_edits() {
+    let (dir, mut b, project, task) = setup();
+    let done = call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":1,"status":"done","completion_summary":"Done"}),
+    );
+    b.conn.execute("UPDATE events SET created_at='2026-10-01T01:00:00Z' WHERE task_id=?1 AND json_extract(data,'$.task.status')='done'",[&task]).unwrap();
+    call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":done["task"]["revision"],"title":"Edited later"}),
+    );
+    let unknown = call(
+        &mut b,
+        "task.create",
+        json!({"project_id":project,"title":"Old task with no completion evidence"}),
+    )["task_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    b.conn
+        .execute(
+            "UPDATE tasks SET status='done',updated_at='2026-10-23T01:00:00Z' WHERE id=?1",
+            [&unknown],
+        )
+        .unwrap();
+    b.conn.execute_batch("DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;").unwrap();
+    drop(b);
+    let b = Board::open(dir.path()).unwrap();
+    assert_eq!(
+        get_task(&b.conn, &task).unwrap().completed_at.as_deref(),
+        Some("2026-10-01T01:00:00Z")
+    );
+    assert_eq!(get_task(&b.conn, &unknown).unwrap().completed_at, None);
+}
+
+#[test]
+fn conditional_snapshots_are_small_and_refresh_after_real_changes() {
+    let (_dir, mut b, _, task) = setup();
+    let state = call(&mut b, "board.snapshot", json!({}));
+    let unchanged = call(
+        &mut b,
+        "board.snapshot",
+        json!({"if_sequence":state["event_sequence"]}),
+    );
+    assert_eq!(unchanged["unchanged"], true);
+    assert!(unchanged.get("tasks").is_none());
+    assert!(unchanged.get("automations").is_none());
+    call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":1,"title":"Changed"}),
+    );
+    let changed = call(
+        &mut b,
+        "board.snapshot",
+        json!({"if_sequence":state["event_sequence"]}),
+    );
+    assert_eq!(changed["tasks"][0]["title"], "Changed");
+}
+
+#[test]
+fn widget_health_reports_failure_then_recovers_without_editing_tasks() {
+    let (dir, mut b, _, task) = setup();
+    let shared = dir.path().join("shared/widget.json");
+    call(&mut b, "widget.configure", json!({"snapshot_path":shared}));
+    fs::remove_file(&shared).unwrap();
+    fs::remove_dir(shared.parent().unwrap()).unwrap();
+    fs::write(shared.parent().unwrap(), "Not a directory").unwrap();
+    call(
+        &mut b,
+        "task.update",
+        json!({"task_id":task,"expected_revision":1,"title":"Saved despite failure"}),
+    );
+    let health = call(&mut b, "doctor", json!({}));
+    assert_eq!(health["healthy"], false);
+    assert_eq!(health["core_healthy"], true);
+    assert_eq!(health["status"], "degraded");
+    assert_eq!(health["widget"]["state"], "unavailable");
+    let sequence = health["event_sequence"].clone();
+    fs::remove_file(shared.parent().unwrap()).unwrap();
+    fs::create_dir(shared.parent().unwrap()).unwrap();
+    // Simulate the retry deadline without a slow wall-clock test.
+    b.widget_publication.borrow_mut().expire_for_test();
+    b.maintain_widget();
+    let recovered = call(&mut b, "doctor", json!({}));
+    assert_eq!(recovered["healthy"], true);
+    assert_eq!(recovered["event_sequence"], sequence);
+    let payload: Value = serde_json::from_slice(&fs::read(shared).unwrap()).unwrap();
+    assert_eq!(payload["event_sequence"], sequence);
+    assert_eq!(payload["tasks"][0]["title"], "Saved despite failure");
+    assert!(payload["tasks"][0].get("goal").is_none());
+    assert!(payload.get("inbox").is_none());
+    let generated = payload["generated_at"].clone();
+    call(&mut b, "widget.refresh", json!({}));
+    let payload: Value =
+        serde_json::from_slice(&fs::read(dir.path().join("widget-snapshot.json")).unwrap())
+            .unwrap();
+    assert_eq!(payload["generated_at"], generated);
+    assert!(payload["checked_at"].is_string());
+}
 #[test]
 fn retries_survive_restart_and_conflicting_payload_is_rejected() {
     let (dir, mut b, p, _) = setup();
@@ -382,7 +531,9 @@ fn widget_failure_does_not_fail_committed_tasks() {
     );
     drop(b);
     let mut b = Board::open(dir.path()).unwrap();
-    assert_eq!(call(&mut b, "doctor", json!({}))["healthy"], true);
+    let health = call(&mut b, "doctor", json!({}));
+    assert_eq!(health["core_healthy"], true);
+    assert_eq!(health["healthy"], false);
 }
 #[test]
 fn stale_claim_is_retained_until_owner_releases_and_heartbeat_refreshes() {

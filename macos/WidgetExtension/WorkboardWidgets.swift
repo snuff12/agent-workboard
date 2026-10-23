@@ -62,7 +62,7 @@ struct WorkboardEntry: TimelineEntry {
     /// Later entries for the same data: the stale label and the start of the next day.
     func followUps(calendar: Calendar = .current) -> [WorkboardEntry] {
         var dates: [Date] = []
-        if let generated = snapshot?.generatedAt { dates.append(generated.addingTimeInterval(WidgetSnapshot.staleInterval)) }
+        if let checked = snapshot?.lastCheckedAt { dates.append(checked.addingTimeInterval(WidgetSnapshot.staleInterval)) }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date)) { dates.append(tomorrow) }
         return dates.filter { $0 > date }.sorted().map {
             WorkboardEntry(date: $0, mode: mode, accent: accent, snapshot: snapshot, failed: failed, collapsed: collapsed)
@@ -225,12 +225,13 @@ struct WorkboardWidgetFooter: View {
             Circle().fill(entry.stale ? Color.orange : accent).frame(width: 4, height: 4)
             if let timestamp = entry.snapshot?.generatedAt {
                 Text(timestamp, style: .time)
-                Text(entry.stale ? "· Stale" : "· Updated")
+                Text(entry.stale ? "· Check connection" : "· Synced")
             } else {
                 Text("Not updated yet")
             }
             Spacer(minLength: 0)
         }.font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+            .help("Time of the last data change. Connection status uses the service's separate publication check.")
     }
 }
 
@@ -304,7 +305,7 @@ struct WorkboardTodayLayout: View {
         case .now, .review:
             return task.assignee.flatMap { $0.isEmpty ? nil : ($0, false) }
         case .done:
-            return (task.updatedAt.formatted(.dateTime.hour().minute().locale(Locale(identifier: "en_US"))), false)
+            return task.completedAt.map { ($0.formatted(.dateTime.hour().minute().locale(Locale(identifier: "en_US"))), false) }
         case .today:
             if task.isOverdue(at: entry.date, calendar: calendar) { return ("Overdue", true) }
             if let due = task.dueAt, let date = WidgetTask.parse(due, calendar: calendar),

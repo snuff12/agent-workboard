@@ -95,10 +95,19 @@ wait_stopped() {
     return 1
 }
 probe_service() {
-    local response
+    local response core_health
     response="$(printf '%s\n' '{"schema_version":1,"request_id":"installer-health","method":"doctor","params":{}}' | nc -U -w 2 "$SOCKET_PATH" 2>/dev/null || true)"
-    [[ "$(printf '%s' "$response" | plutil -extract ok raw -o - - 2>/dev/null || true)" == true && \
-       "$(printf '%s' "$response" | plutil -extract result.healthy raw -o - - 2>/dev/null || true)" == true ]]
+    core_health="$(printf '%s' "$response" | plutil -extract result.core_healthy raw -o - - 2>/dev/null || true)"
+    if [[ -z "$core_health" ]]; then core_health="$(printf '%s' "$response" | plutil -extract result.healthy raw -o - - 2>/dev/null || true)"; fi
+    [[ "$(printf '%s' "$response" | plutil -extract ok raw -o - - 2>/dev/null || true)" == true && "$core_health" == true ]]
+}
+wait_healthy() {
+    local attempt
+    for attempt in $(seq 1 80); do
+        if probe_service; then return 0; fi
+        sleep 0.1
+    done
+    return 1
 }
 
 for executable in workboard workboard-service; do
@@ -125,9 +134,27 @@ finish() {
     trap - EXIT INT TERM HUP
     set +e
     local preserve_stage=0
-    if [[ "$status" != 0 ]]; then
+    if [[ "$status" != 0 && "$NEW_BOOTSTRAPPED" == 1 ]]; then
+        # Startup can migrate SQLite before bootstrap or the health probe returns.
+        # Keep this executable with that database, including any newly accepted writes.
+        preserve_stage=1
+        echo 'Installation did not complete after new service startup was attempted. Keeping the new app and database together; automatic downgrade is unsafe.' >&2
+        if ! launchctl print "${DOMAIN}/${SERVICE_LABEL}" >/dev/null 2>&1; then
+            if ! launchctl bootstrap "$DOMAIN" "$AGENT"; then
+                # Login registration may be unavailable. Recover core access with the
+                # same compatible executable, only if there is no other verified writer.
+                if inspect_writer && [[ -z "$WRITER_PID" ]]; then
+                    "${APP_DESTINATION}/Contents/Helpers/workboard-service" --data-dir "$DATA_DIR" --socket "$SOCKET_PATH" </dev/null >>"${DATA_DIR}/service.log" 2>&1 &
+                fi
+            fi
+        fi
+        if wait_healthy && inspect_writer && [[ "$WRITER_EXECUTABLE" == "${APP_DESTINATION}/Contents/Helpers/workboard-service" ]]; then
+            echo 'The new task service is healthy. Run the installer again with the same options to finish registration.' >&2
+        else
+            echo "The new service is not healthy yet. Inspect ${LOG_DIR}/service-error.log and ${DATA_DIR}/service.log, then retry installation. Do not start the previous service against this database." >&2
+        fi
+    elif [[ "$status" != 0 ]]; then
         echo 'Installation did not complete. Restoring the previous app and service configuration.' >&2
-        if [[ "$NEW_BOOTSTRAPPED" == 1 ]]; then launchctl bootout "${DOMAIN}/${SERVICE_LABEL}" >/dev/null 2>&1 || true; wait_stopped || true; fi
         if [[ "$APP_SWAPPED" == 1 ]]; then
             if [[ -e "${STAGING_DIR}/previous.app" ]]; then
                 if [[ -e "$APP_DESTINATION" ]]; then mv "$APP_DESTINATION" "${STAGING_DIR}/rejected.app"; fi
@@ -154,7 +181,7 @@ finish() {
         fi
         if [[ "$REGISTER_APP" == 1 && -d "$APP_DESTINATION" ]]; then "$LSREGISTER" -f "$APP_DESTINATION" >/dev/null 2>&1 || true; fi
     fi
-    if [[ "$preserve_stage" == 0 ]]; then rm -rf "$STAGING_DIR"; else echo "Previous app copy preserved: ${STAGING_DIR}" >&2; fi
+    if [[ "$preserve_stage" == 0 ]]; then rm -rf "$STAGING_DIR"; else echo "Installation recovery files preserved: ${STAGING_DIR}" >&2; fi
     exit "$status"
 }
 trap finish EXIT
@@ -243,17 +270,17 @@ if [[ "$START_SERVICE" == 1 ]]; then
     plutil -lint "$NEW_AGENT"
     AGENT_CHANGED=1
     cp "$NEW_AGENT" "$AGENT"
+    # This is the recovery boundary: even a failed bootstrap may have run migrations.
     NEW_BOOTSTRAPPED=1
     launchctl bootstrap "$DOMAIN" "$AGENT"
-    READY=0
-    for attempt in $(seq 1 80); do
-        if probe_service; then READY=1; break; fi
-        sleep 0.1
-    done
-    [[ "$READY" == 1 ]] || { echo 'The registered service did not return a healthy response.' >&2; exit 1; }
+    wait_healthy || { echo 'The registered service did not return a healthy response.' >&2; exit 1; }
     inspect_writer
     [[ "$WRITER_EXECUTABLE" == "${APP_DESTINATION}/Contents/Helpers/workboard-service" ]] || { echo 'The new service executable differs from the installed app.' >&2; exit 1; }
     echo "User service registered and health verified: ${AGENT}"
+    WIDGET_HEALTH="$(printf '%s\n' '{"schema_version":1,"request_id":"installer-widget-health","method":"widget.status","params":{}}' | nc -U -w 2 "$SOCKET_PATH" 2>/dev/null || true)"
+    if [[ "$(printf '%s' "$WIDGET_HEALTH" | plutil -extract result.healthy raw -o - - 2>/dev/null || true)" == false ]]; then
+        echo 'Tasks are available, but widget publication failed. Run workboard doctor --json for destination errors. The service will retry automatically.' >&2
+    fi
 fi
 # A running widget extension keeps drawing with the replaced binary until it exits. WidgetKit relaunches it.
 if [[ "$REGISTER_APP" == 1 ]]; then

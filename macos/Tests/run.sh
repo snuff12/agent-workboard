@@ -4,7 +4,7 @@ macos_dir="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$macos_dir/.build"
 sources=()
 for source in "$macos_dir"/Sources/WorkboardApp/*.swift; do
-  if [[ "$(basename "$source")" != "WorkboardApp.swift" ]]; then
+  if [[ "${source##*/}" != "WorkboardApp.swift" ]]; then
     sources+=("$source")
   fi
 done

@@ -91,9 +91,11 @@ The contract includes protocol version, request ID, method, parameters, and stru
 
 ## App and widget refresh
 
-The active SwiftUI app polls the board snapshot every second and preserves UI state when the event sequence is unchanged. The menu bar shares this state. WidgetKit reads App Group JSON. Complete a temporary snapshot and atomically replace the destination to avoid partial JSON reads.
+The active SwiftUI app polls every second with its last event sequence. Unchanged responses skip full task and automation queries and preserve UI state. A full read at least once a minute refreshes time-derived values such as claim expiry. Forced refreshes and reconnects also read the full board. The menu bar shares this state. WidgetKit reads App Group JSON. Complete a temporary snapshot and atomically replace the destination to avoid partial JSON reads.
 
-Snapshots contain format version, sequence, generation time, and task display data. On generation failure, keep the previous timestamp and expose staleness. Database commit and snapshot publication are separate; compare sequences and recover on service restart.
+Widget snapshots contain format version, sequence, data generation time, connection check time, and task display data from a single query. Full descriptions, automation history, and planning collections are excluded. Successful publication updates `checked_at`; `generated_at` records data changes. The service refreshes healthy idle snapshots every five minutes and retries failed publication every thirty seconds. Maintenance does not create task events or revisions. The widget reports a connection warning after fifteen minutes without a successful check. Publication failure preserves committed tasks and appears in doctor output and the app warning.
+
+Schema 8 stores `completed_at` on transitions into Done and clears it on reopening. Later edits and trash restoration preserve it. Migration recovers known transitions from events and leaves missing historical evidence null. The completed-today widget uses this field instead of `updated_at`.
 
 macOS controls actual widget refresh timing. WidgetKit accepts reload requests only from the containing app. After writing the shared snapshot, the service runs that app's executable with `--reload-widgets`. This mode requests a reload without showing a window, then exits. Changes arriving during execution are coalesced into one additional run. CLI changes can therefore reach the widget with the app window closed. The widget also rereads after five minutes and updates at midnight and staleness boundaries.
 

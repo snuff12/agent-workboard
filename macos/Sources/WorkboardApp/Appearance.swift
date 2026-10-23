@@ -58,9 +58,9 @@ struct ThemeConfiguration: Codable, Equatable {
     let sharesWidgetSettings: Bool
     static let palettes: [(name: String, hex: String)] = [("Iris", "5473E8"), ("Ocean", "168DAD"), ("Forest", "39836B"), ("Plum", "9972C4"), ("Rose", "C75C78"), ("Amber", "B77B2C"), ("Graphite", "657080")]
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, sharesWidgetSettings: Bool? = nil) {
         self.defaults = defaults
-        sharesWidgetSettings = defaults === UserDefaults.standard
+        self.sharesWidgetSettings = sharesWidgetSettings ?? (defaults === UserDefaults.standard)
         if let data = defaults.data(forKey: Self.storageKey), let stored = try? JSONDecoder().decode(ThemeConfiguration.self, from: data), let valid = try? stored.validated() { theme = valid } else { theme = ThemeConfiguration() }
         executablePath = defaults.string(forKey: "workboardExecutablePath") ?? ""
         dataDirectory = defaults.string(forKey: "workboardDataDirectory") ?? ""

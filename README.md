@@ -61,6 +61,8 @@ Data defaults to `~/Library/Application Support/AgentWorkboard`. Use `--data-dir
 
 `scripts/verify-plugin-packages.sh` checks the two files in each ZIP, extracts and installs it through an isolated CLI, and verifies the disabled default. It does not use the user's board or external accounts.
 
+Run `python3 scripts/verify.py` for the complete local regression checks, or add `--scope core` for Rust and plugin fixtures only. The runner builds executables before testing, clears inherited board connection settings, and stops at the first failed check. GitHub Actions uses the same runner on macOS. Python is a development test dependency, not a core installation requirement. Desktop widget hosting and real account connections require separate evidence.
+
 ## Technology
 
 | Component | Technology |

@@ -5,11 +5,12 @@ struct WidgetSnapshot: Decodable, Sendable {
     let schemaVersion: Int
     let eventSequence: Int64
     let generatedAt: Date
+    var checkedAt: Date? = nil
     let tasks: [WidgetTask]
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version", eventSequence = "event_sequence"
-        case generatedAt = "generated_at", tasks
+        case generatedAt = "generated_at", checkedAt = "checked_at", tasks
     }
 
     static func decode(_ data: Data) throws -> WidgetSnapshot {
@@ -59,8 +60,10 @@ struct WidgetSnapshot: Decodable, Sendable {
                 if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
                 return lhs.id < rhs.id
             }
-        let finished = tasks.filter { $0.status == "done" && $0.updatedAt >= today && $0.updatedAt < tomorrow }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        let finished = tasks.filter { task in
+            guard task.status == "done", let completed = task.completedAt else { return false }
+            return completed >= today && completed < tomorrow
+        }.sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
         var result: [(section: WidgetSection, tasks: [WidgetTask])] = [(.now, working)]
         if !review.isEmpty { result.append((.review, review)) }
         result.append((.today, due))
@@ -82,7 +85,8 @@ struct WidgetSnapshot: Decodable, Sendable {
         return shown
     }
 
-    func isStale(at date: Date) -> Bool { date.timeIntervalSince(generatedAt) >= Self.staleInterval }
+    var lastCheckedAt: Date { checkedAt ?? generatedAt }
+    func isStale(at date: Date) -> Bool { date.timeIntervalSince(lastCheckedAt) >= Self.staleInterval }
     static let staleInterval: TimeInterval = 15 * 60
 
     enum SnapshotError: Error { case unsupportedVersion }
@@ -98,6 +102,7 @@ struct WidgetTask: Decodable, Identifiable, Sendable {
     let updatedAt: Date
     let projectId: String
     let parentId: String?
+    var completedAt: Date? = nil
     var dueAt: String? = nil
     var scheduledStart: String? = nil
     var scheduledEnd: String? = nil
@@ -107,6 +112,7 @@ struct WidgetTask: Decodable, Identifiable, Sendable {
         case id, title, status, assignee, priority
         case nextAction = "next_action", updatedAt = "updated_at"
         case projectId = "project_id", parentId = "parent_id"
+        case completedAt = "completed_at"
         case dueAt = "due_at", scheduledStart = "scheduled_start", scheduledEnd = "scheduled_end"
         case timeZone = "time_zone"
     }
