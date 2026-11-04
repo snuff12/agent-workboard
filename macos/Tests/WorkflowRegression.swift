@@ -12,6 +12,10 @@ import Darwin
         print("✓ Workflow Swift model and Store regression checks passed with the actual service (separate from native click validation)")
     }
     static func models() throws {
+        let checks = try JSONDecoder().decode(JSONValue.self, from: Data(#"[{"id":"failed","artifact_id":"original","status":"integration_failure","checked_at":"2026-11-01T04:00:00Z"},{"id":"current","artifact_id":"original","status":"current","checked_at":"2026-11-01T03:00:00Z"},{"id":"replacement","artifact_id":"new","status":"current","checked_at":"2026-11-01T05:00:00Z"}]"#.utf8)).array.compactMap(EvidenceVerification.init)
+        let history = EvidenceVerification.history(Array(checks.reversed()), artifactID: "original")
+        try check(history.map(\.id) == ["failed", "current"] && history.first?.title == "Check failed · no source verdict", "Evidence history mixed replacement sources or hid a failed attempt")
+        try check(history.last?.title == "Matched at check", "A historical hash match was displayed as an unconditional freshness claim")
         let now = BoardDate.parseTimestamp("2026-10-15T12:00:00Z")!
         let json: JSONValue = .object(["id": .string("t"), "project_id": .string("p"), "title": .string("API verification"), "status": .string("todo"), "assignee": .string("codex"), "updated_at": .string("2026-10-01T12:00:00Z"), "ready": .bool(false), "dependency_ids": .array([.string("pre")]), "blocked_by": .array([.string("pre")]), "checklist": .array([.object(["id": .string("c"), "text": .string("Regression check"), "required": .bool(true), "checked": .bool(false), "evidence": .string("log")])])])
         guard let task = BoardTask(json) else { throw Failure(description: "Workflow task did not decode") }

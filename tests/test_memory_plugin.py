@@ -306,12 +306,15 @@ class MemoryPluginTests(unittest.TestCase):
         self.assertEqual(artifact["metadata"]["query"], "task state storage")
         self.assertNotIn("query", self.attached_artifact()["metadata"])
 
-    def test_verify_reports_current_source_without_mutation_or_search(self):
+    def test_verify_reports_current_source_and_requests_a_separate_history_record(self):
         artifact = self.attached_artifact(query="task state storage")
         before = len(self.calls())
         response = self.invoke("verify", {"artifact": artifact})
         self.assertTrue(response["ok"], response)
-        self.assertNotIn("requests", response)
+        [record] = response["requests"]
+        self.assertEqual(record["method"], "artifact.verification.record")
+        self.assertEqual(record["params"]["source"]["scope"], artifact["metadata"]["scope"])
+        self.assertEqual(record["params"]["source"]["source_sha256"], artifact["metadata"]["source_sha256"])
         result = response["result"]
         self.assertEqual(result["status"], "current")
         self.assertEqual((result["artifact_id"], result["path"]), ("artifact-1", str(self.source)))
@@ -343,6 +346,24 @@ class MemoryPluginTests(unittest.TestCase):
         self.assert_flag(search, "--domain", self.scope["domain"])
         self.assertIn("--explain", search)
 
+    def test_verify_accepts_legacy_metadata_provider_without_a_top_level_provider(self):
+        artifact = dict(self.attached_artifact(), provider=None)
+        response = self.invoke("verify", {"artifact": artifact})
+        self.assertTrue(response["ok"], response)
+        self.assertEqual(response["result"]["status"], "current")
+        self.assertEqual(response["requests"][0]["params"]["source"]["provider"], "agent-memory")
+
+    def test_verify_does_not_invent_a_source_verdict_from_malformed_provenance(self):
+        artifact = self.attached_artifact(query="evidence")
+        artifact["metadata"]["ref"] = "doc:missing-hash"
+        before = len(self.calls())
+        response = self.invoke("verify", {"artifact": artifact})
+        self.assertTrue(response["ok"], response)
+        self.assertEqual(response["result"]["status"], "integration_failure")
+        self.assertIsNone(response["requests"][0]["params"]["observed"])
+        self.assertNotIn("candidates", response["result"])
+        self.assertEqual(len(self.calls()) - before, 1)
+
     def test_verify_reports_expired_ref_and_uses_supplied_query_for_older_evidence(self):
         artifact = self.attached_artifact()
         artifact["metadata"] = dict(artifact["metadata"], ref="doc:expired")
@@ -367,15 +388,21 @@ class MemoryPluginTests(unittest.TestCase):
         artifact = self.attached_artifact()
         before = len(self.calls())
         for candidate in (None, {"path": "/file.md"}, dict(artifact, metadata=dict(artifact["metadata"], provider="orca")),
-                          dict(artifact, metadata=dict(artifact["metadata"], source_sha256=""))):
+                          dict(artifact, provider="orca"),
+                          dict(artifact, metadata=dict(artifact["metadata"], source_sha256="")),
+                          dict(artifact, metadata=dict(artifact["metadata"], scope="unscoped")),
+                          dict(artifact, metadata=dict(artifact["metadata"], scope={"project": None}))):
             with self.subTest(artifact=candidate):
                 self.assert_rejected(self.invoke("verify", {"artifact": candidate}), code="INVALID_REQUEST")
         self.assertEqual(len(self.calls()), before)
 
-    def test_verify_fails_instead_of_reporting_unreadable_when_amem_cannot_run(self):
+    def test_verify_records_failure_without_a_source_verdict_when_amem_cannot_run(self):
         artifact = self.attached_artifact()
         response = self.invoke("verify", {"artifact": artifact}, executable=self.directory / "does-not-exist")
-        self.assert_rejected(response, "Could not run")
+        self.assertTrue(response["ok"], response)
+        self.assertEqual(response["result"]["status"], "integration_failure")
+        self.assertIn("Could not run", response["result"]["detail"])
+        self.assertIsNone(response["requests"][0]["params"]["observed"])
 
     def test_malformed_search_response_is_an_integration_error(self):
         environment = dict(self.environment, FAKE_SEARCH_MALFORMED="1")

@@ -192,6 +192,7 @@ struct TaskDetail: Sendable {
     let task: BoardTask
     let children: [BoardTask]
     let artifacts: [TaskArtifact]
+    let evidenceVerifications: [EvidenceVerification]
     let runs: [TaskRun]
     let events: [JSONValue]
     let reviewDecisions: [ReviewDecision]
@@ -200,6 +201,7 @@ struct TaskDetail: Sendable {
         guard let task = BoardTask(json["task"]) else { return nil }
         self.task = task; children = json["children"].array.compactMap(BoardTask.init)
         artifacts = json["artifacts"].array.enumerated().map { TaskArtifact($0.element, index: $0.offset) }
+        evidenceVerifications = json["evidence_verifications"].array.compactMap(EvidenceVerification.init)
         runs = json["runs"].array.enumerated().map { TaskRun($0.element, index: $0.offset) }
         self.events = events ?? (json["events"].array.isEmpty ? json["history"].array : json["events"].array)
         reviewDecisions = json["review_decisions"].array.compactMap(ReviewDecision.init)

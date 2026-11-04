@@ -74,6 +74,41 @@ fn finish(b: &mut Board, outcome: &str, version: &str) {
     settle(b, context, version);
 }
 
+#[test]
+fn evidence_checks_preserve_active_automation_and_final_approval() {
+    let (_dir, mut b, t) = setup(1);
+    let artifact = call(&mut b,"task.attach",json!({"task_id":t,"path":"/synthetic/design.md",
+        "provider":"agent-memory","metadata":{"ref":"doc:one","collection":"docs","source_sha256":"hash","scope":{}}}))["artifact"].clone();
+    let source = crate::evidence::source(&serde_json::from_value(artifact.clone()).unwrap());
+    let observation = json!({"task_id":t,"artifact_id":artifact["id"],"source":source,
+        "status":"current","checked_at":"2026-11-01T00:00:00Z",
+        "observed":{"path":source["path"],"collection":source["collection"],"source_sha256":source["source_sha256"]}});
+    control(&mut b, &t, "automation.start", json!({}));
+    let context = active(&mut b);
+    call(&mut b, "artifact.verification.record", observation.clone());
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":t}))["automation"]["state"],
+        "running"
+    );
+    report(&mut b, &context, "pass", "version-one");
+    settle(&mut b, context, "version-one");
+    for _ in 0..5 {
+        if call(&mut b, "task.get", json!({"task_id":t}))["automation"]["state"] != "running" {
+            break;
+        }
+        finish(&mut b, "pass", "version-one");
+    }
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":t}))["automation"]["state"],
+        "awaiting_approval"
+    );
+    call(&mut b, "artifact.verification.record", observation);
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":t}))["automation"]["state"],
+        "awaiting_approval"
+    );
+}
+
 fn preset_configuration(preset: &str) -> Value {
     json!({"configuration":{"plugin_id":"fixture","method":"automation.start","resource_key":"workspace","params":{},"max_reworks":3,"timeout_seconds":60,"process_preset":preset}})
 }

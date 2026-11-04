@@ -95,6 +95,7 @@ The new Rust workboard and a possible port of Python amem are separate projects.
 | [Architecture](docs/architecture.md) | Sources of truth, single writer, plugin boundaries, app/widget refresh |
 | [CLI contract](docs/cli-contract.md) | Commands, JSON output, conflicts, retries |
 | [agent-memory](docs/agent-memory-integration.md) | Optional installation, failure isolation, evidence, memory capture |
+| [Memory evidence follow-up](docs/memory-evidence-follow-up.md) | Saved verification history, source status display, acceptance checks, and verification evidence |
 | [Implementation plan](docs/implementation-plan.md) | Stages, deliverables, validation, remaining decisions |
 | [Product research](docs/product-research.md) | Comparable tools and original sources |
 | [Design decisions](docs/design-decisions.md) | Requirements, choices, alternatives, reconsideration criteria |

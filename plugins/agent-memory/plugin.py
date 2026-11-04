@@ -23,6 +23,10 @@ class ExecutableUnavailable(IntegrationError):
     """amem could not be started or did not answer, so nothing about the source is known."""
 
 
+class SourceFormatError(IntegrationError):
+    """The tool response cannot establish source identity or readability."""
+
+
 def invalid(message):
     return IntegrationError(message, "INVALID_REQUEST")
 
@@ -65,13 +69,13 @@ def read_source(executable, ref, params):
                               "--memory-status", "reviewed", *scope_args(params)])
     boundary = re.search(r"^--- (.+?) \| ref .+? ---$", raw, re.MULTILINE)
     if not boundary:
-        raise IntegrationError("Could not verify the source path and location. Search and read the source again.")
+        raise SourceFormatError("Could not verify the source path and location. Search and read the source again.")
     provenance = re.findall(r"^(path|collection|sha256): (.+)$", raw[:boundary.start()], re.MULTILINE)
     if len({key for key, _ in provenance}) != len(provenance):
-        raise IntegrationError("The source path and verification header are ambiguous. Check the source again.")
+        raise SourceFormatError("The source path and verification header are ambiguous. Check the source again.")
     headers = dict(provenance)
     if not all(headers.get(k) for k in ("path", "collection", "sha256")):
-        raise IntegrationError("Could not verify the source path and content hash. Search and read the source again.")
+        raise SourceFormatError("Could not verify the source path and content hash. Search and read the source again.")
     return headers, boundary.group(1)
 
 
@@ -84,28 +88,36 @@ def verify(executable, params):
     if not isinstance(artifact, dict) or not isinstance(artifact.get("metadata"), dict):
         raise invalid("Pass the attached artifact, including its metadata, as artifact.")
     metadata = artifact["metadata"]
-    if metadata.get("provider") != "agent-memory":
+    if metadata.get("provider") != "agent-memory" or artifact.get("provider") not in (None, "agent-memory"):
         raise invalid("Only evidence attached by agent-memory can be verified.")
     if not all(isinstance(metadata.get(k), str) and metadata[k] for k in ("ref", "collection", "source_sha256")):
         raise invalid("The artifact metadata needs ref, collection, and source_sha256.")
-    scope = metadata.get("scope") if isinstance(metadata.get("scope"), dict) else {}
+    scope = metadata.get("scope", {})
+    if not isinstance(scope, dict) or any(key in scope and (not isinstance(scope[key], str) or not scope[key])
+                                          for key in ("project", "domain")):
+        raise invalid("The saved scope is malformed. Search and attach the source again with an explicit scope.")
     result = {"artifact_id": artifact.get("id"), "path": artifact.get("path"), "checked_at": now(),
               "recorded_sha256": metadata["source_sha256"]}
     try:
+        if not executable:
+            raise ExecutableUnavailable("Set the amem executable path in plugin configuration.")
         headers, locator = read_source(executable, metadata["ref"], scope)
-    except ExecutableUnavailable:
-        raise
+    except (ExecutableUnavailable, SourceFormatError) as error:
+        result.update(status="integration_failure", detail=str(error), error_code=error.code)
     except IntegrationError as error:
         # An expired ref is the expected result after amem reindexes a changed source.
         result.update(status="unreadable", detail=str(error))
     else:
         result["current_sha256"] = headers["sha256"]
+        result["observed"] = {"path": headers["path"], "collection": headers["collection"],
+                              "source_sha256": headers["sha256"], "locator": locator}
         unchanged = (headers["sha256"] == metadata["source_sha256"] and headers["collection"] == metadata["collection"]
                      and headers["path"] == artifact.get("path"))
         result["status"] = "current" if unchanged else "changed"
         result["locator"] = locator
+    result["checked_at"] = now()
     query = params.get("query") or metadata.get("query")
-    if result["status"] != "current":
+    if result["status"] in ("changed", "unreadable"):
         if query:
             try:
                 found = search(executable, dict(scope, query=query, collection=metadata["collection"], limit=5))
@@ -116,6 +128,23 @@ def verify(executable, params):
         result["next_step"] = ("Read a replacement candidate and attach it." if result.get("candidates")
                                else "Search the collection again with the same scope, then attach the current source.")
     return result
+
+
+def verification_response(executable, params):
+    artifact = params.get("artifact")
+    if not isinstance(artifact, dict) or not artifact.get("id") or not artifact.get("task_id"):
+        raise invalid("Pass a saved artifact with its id and task_id.")
+    result = verify(executable, params)
+    metadata = artifact["metadata"]
+    source = {"path": artifact.get("path"), "provider": artifact.get("provider") or metadata.get("provider"),
+              "locator": artifact.get("locator") or metadata.get("locator"),
+              **{key: metadata.get(key) for key in ("ref", "collection", "source_sha256", "scope")}}
+    record = {"task_id": artifact["task_id"], "artifact_id": artifact["id"], "source": source,
+              "status": result["status"], "checked_at": result["checked_at"],
+              "observed": result.get("observed"), "detail": result.get("detail", "")[:1500],
+              "error_code": result.get("error_code"), "actor": "plugin:agent-memory"}
+    return {"ok": True, "result": result,
+            "requests": [{"method": "artifact.verification.record", "params": record}]}
 
 
 def capture_scope(params):
@@ -141,7 +170,7 @@ def capture_source(params):
 def run(request):
     params = request.get("params", {})
     executable = request.get("config", {}).get("executable")
-    if not executable:
+    if not executable and request.get("method") != "verify":
         raise IntegrationError("Set the amem executable path in plugin configuration.")
     method = request["method"]
     if method == "check":
@@ -152,7 +181,7 @@ def run(request):
             raise invalid("Specify collection and query.")
         return {"ok": True, "result": search(executable, params)}
     if method == "verify":
-        return {"ok": True, "result": verify(executable, params)}
+        return verification_response(executable, params)
     if method in ("read", "attach"):
         if not params.get("ref"):
             raise invalid("Specify the ref returned by the search result.")
@@ -173,6 +202,8 @@ def run(request):
         if params.get("query"):
             # Keep the search wording so verify can rediscover the source after its ref expires.
             metadata["query"] = str(params["query"])
+        if params.get("supersedes_artifact_id"):
+            metadata["supersedes_artifact_id"] = str(params["supersedes_artifact_id"])
         return {"ok": True, "result": metadata, "requests": [{"method": "task.attach", "params": {
             "task_id": params["task_id"], "path": headers["path"], "kind": "evidence",
             "description": params.get("description", "amem verified source evidence"),
