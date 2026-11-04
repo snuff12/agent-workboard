@@ -1,7 +1,7 @@
 {
   "id": "agent-memory",
   "name": "agent-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocol_version": 1,
   "executable": "plugin.py",
   "methods": [
@@ -13,13 +13,15 @@
     "capture"
   ],
   "allowed_requests": [
-    "task.attach"
+    "task.attach",
+    "artifact.verification.record"
   ],
   "description": "Search evidence with the existing amem CLI, attach verified sources to tasks, and recheck attached sources.",
   "read_only_methods": [
     "check",
     "search",
-    "read",
-    "verify"
-  ]
+    "read"
+  ],
+  "artifact_context_methods": ["verify"],
+  "timeout_seconds": 60
 }

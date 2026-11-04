@@ -37,6 +37,8 @@ import Combine
     @Published var completionTask: BoardTask?
     /// The enabled Orca plugin, so cards can link worktrees without opening plugin settings.
     @Published var orcaPlugin: InstalledPlugin?
+    @Published var memoryPlugin: InstalledPlugin?
+    @Published var recheckingArtifactID: String?
     @Published var worktreeLinkTask: BoardTask?
     @Published var deletionTask: BoardTask?
     @Published var purgeItem: TrashItem?
@@ -45,6 +47,7 @@ import Combine
     @Published var notice: String?
     let appearance: AppearanceSettings
     private let client = WorkboardClient()
+    private let evidenceClient = WorkboardClient()
     private var reloading = false
     private var eventSequence: Int?
     private var lastFullReload: Date?
@@ -117,7 +120,7 @@ import Combine
         if connectionIdentity != nil { pendingDeepLink = nil }
         connectionIdentity = identity; connectionGeneration = UUID()
         eventSequence = nil; lastFullReload = nil; widgetConfigurationKey = nil; lastUpdated = nil
-        projects = []; tasks = []; automations = [:]; automationDefaults = [:]; processPresets = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; worktreeLinkTask = nil
+        projects = []; tasks = []; automations = [:]; automationDefaults = [:]; processPresets = []; selectedProjectID = nil; selectedTaskID = nil; detail = nil; orcaPlugin = nil; memoryPlugin = nil; worktreeLinkTask = nil
         templates = []; savedViews = []; inbox = []; trash = []; selectedViewID = nil; filters = TaskFilters(); selectedLayout = "board"
         queryResultIDs = nil; queryResultKey = nil
         draft = nil; completionTask = nil; deletionTask = nil; purgeItem = nil; confirmingEmptyTrash = false; undoDeletion = nil; showingNewProject = false
@@ -252,6 +255,25 @@ import Combine
         guard let response = try? await client.call("plugin.list", configuration: configuration),
               isCurrentConnection(identity, generation: generation) else { return }
         orcaPlugin = response["plugins"].array.compactMap(InstalledPlugin.init).first { $0.id == "orca" && $0.enabled && $0.compatible }
+        memoryPlugin = response["plugins"].array.compactMap(InstalledPlugin.init).first { $0.id == "agent-memory" && $0.enabled && $0.compatible }
+    }
+    func recheckEvidence(taskID: String, artifactID: String) async {
+        guard memoryPlugin?.savesEvidenceChecks == true, recheckingArtifactID == nil else { return }
+        let configuration = appearance.connection
+        let identity = configuration.identity(), generation = connectionGeneration
+        recheckingArtifactID = artifactID; actionError = nil
+        defer { recheckingArtifactID = nil }
+        do {
+            let result = try await evidenceClient.call("plugin.run", params: ["id": .string("agent-memory"), "method": .string("verify"), "params": .object(["task_id": .string(taskID), "artifact_id": .string(artifactID)])], configuration: configuration, timeoutSeconds: 75)
+            guard isCurrentConnection(identity, generation: generation) else { return }
+            let saved = result["applied"].array.contains { $0["verification"]["artifact_id"].string == artifactID }
+            notice = saved ? "Source check saved." : "This plugin returned a check without saved history. Update the agent-memory plugin."
+            await reload(force: true)
+            if selectedTaskID == taskID { await loadDetail(taskID) }
+        } catch {
+            guard isCurrentConnection(identity, generation: generation) else { return }
+            actionError = error.localizedDescription
+        }
     }
     func loadDetail(_ id: String) async {
         let configuration = appearance.connection

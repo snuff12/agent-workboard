@@ -260,10 +260,10 @@ else: sys.exit(2)
         old.wait(timeout=10)
         # Reconstruct the previous schema only in this stopped, disposable fixture.
         with sqlite3.connect(self.data / "workboard.sqlite3") as database:
-            database.executescript("DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;")
+            database.executescript("DROP TABLE evidence_verifications; DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;")
         result = self.install("--start-service", "--skip-register",
             env={**self.environment, "WORKBOARD_INSTALL_FAIL_AFTER_START": "1"}, success=False)
-        self.assertEqual(json.loads(self.state.with_suffix(".failed").read_text())["database_version"], 8)
+        self.assertEqual(json.loads(self.state.with_suffix(".failed").read_text())["database_version"], 9)
         self.assertFalse(marker.exists(), "An old app was restored over the migrated database")
         self.assertIn("The new task service is healthy", result.stderr)
         self.assertEqual({task["title"] for task in self.rpc("task.list", {})["tasks"]},

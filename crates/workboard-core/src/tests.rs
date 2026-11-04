@@ -28,6 +28,177 @@ fn setup() -> (TempDir, Board, String, String) {
     (dir, board, p, t)
 }
 
+fn evidence_fixture(b: &mut Board, task: &str) -> (Value, Value) {
+    let a = call(b,"task.attach",json!({"task_id":task,"path":"/synthetic/source.md","kind":"evidence","provider":"agent-memory",
+        "metadata":{"provider":"agent-memory","ref":"doc:original","source_sha256":"original-hash","collection":"docs","scope":{"project":"demo"}}}))["artifact"].clone();
+    let source = evidence::source(&serde_json::from_value(a.clone()).unwrap());
+    let p = json!({"task_id":task,"artifact_id":a["id"],"source":source,"checked_at":"2026-11-01T12:00:00+09:00",
+        "status":"current","observed":{"path":source["path"],"collection":source["collection"],"source_sha256":source["source_sha256"]}});
+    (a, p)
+}
+
+#[test]
+fn evidence_history_survives_restart_retry_backup_and_exports() {
+    let (dir, mut b, _, t) = setup();
+    let (a, p) = evidence_fixture(&mut b, &t);
+    let request = req("artifact.verification.record", p.clone());
+    let first = b.dispatch(request.clone());
+    assert!(first.ok, "{first:?}");
+    assert_eq!(first.result, b.dispatch(request.clone()).result);
+    let mut conflict = request.clone();
+    conflict.params["detail"] = json!("Different observation");
+    assert_eq!(
+        b.dispatch(conflict).error.unwrap().code,
+        "REQUEST_ID_CONFLICT"
+    );
+    let backup = dir.path().join("evidence.sqlite3");
+    call(&mut b, "backup.create", json!({"path":backup}));
+    drop(b);
+    let mut b = Board::open(dir.path()).unwrap();
+    assert_eq!(first.result, b.dispatch(request).result);
+    let detail = call(&mut b, "task.resume_context", json!({"task_id":t}));
+    assert_eq!(detail["artifacts"][0], a);
+    assert_eq!(
+        detail["evidence_verifications"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        detail["evidence_verifications"][0]["checked_at"],
+        "2026-11-01T03:00:00.000Z"
+    );
+    for format in ["json", "markdown"] {
+        let export = call(&mut b, "export", json!({"format":format}));
+        assert!(export["content"]
+            .as_str()
+            .unwrap()
+            .contains("original-hash"));
+        assert!(export["content"].as_str().unwrap().contains("recorded_at"));
+    }
+    call(&mut b, "backup.restore", json!({"path":backup}));
+    assert_eq!(
+        call(&mut b, "artifact.verification.list", json!({"task_id":t}))["evidence_verifications"],
+        detail["evidence_verifications"]
+    );
+}
+
+#[test]
+fn evidence_replacement_and_late_results_keep_the_original_generation() {
+    let (_, mut b, project, t) = setup();
+    let (a, p) = evidence_fixture(&mut b, &t);
+    call(
+        &mut b,
+        "task.update",
+        json!({"task_id":t,"expected_revision":2,"title":"Edited during the check"}),
+    );
+    let replacement = call(&mut b,"task.attach",json!({"task_id":t,"path":a["path"],"metadata":{"source_sha256":"replacement-hash","supersedes_artifact_id":a["id"]}}))["artifact"].clone();
+    call(&mut b, "artifact.verification.record", p.clone());
+    let detail = call(&mut b, "task.get", json!({"task_id":t}));
+    assert_eq!(
+        detail["artifacts"][0]["metadata"]["source_sha256"],
+        "original-hash"
+    );
+    assert_eq!(detail["evidence_verifications"][0]["artifact_id"], a["id"]);
+    assert_ne!(a["id"], replacement["id"]);
+    let mut bad = p.clone();
+    bad["source"]["source_sha256"] = json!("replacement-hash");
+    assert_eq!(
+        b.dispatch(req("artifact.verification.record", bad))
+            .error
+            .unwrap()
+            .code,
+        "EVIDENCE_SOURCE_CONFLICT"
+    );
+    let other = call(
+        &mut b,
+        "task.create",
+        json!({"project_id":project,"title":"Other task"}),
+    )["task_id"]
+        .clone();
+    let mut bad = p;
+    bad["task_id"] = other.clone();
+    assert_eq!(
+        b.dispatch(req("artifact.verification.record", bad))
+            .error
+            .unwrap()
+            .code,
+        "EVIDENCE_SOURCE_CONFLICT"
+    );
+    assert!(
+        !b.dispatch(req(
+            "task.attach",
+            json!({"task_id":other,"path":"/new.md","metadata":{"supersedes_artifact_id":a["id"]}})
+        ))
+        .ok
+    );
+}
+
+#[test]
+fn evidence_history_orders_by_observation_and_distinguishes_failed_attempts() {
+    let (_, mut b, _, t) = setup();
+    let (_, p) = evidence_fixture(&mut b, &t);
+    let mut failed = p.clone();
+    failed["status"] = json!("integration_failure");
+    failed["observed"] = Value::Null;
+    failed["checked_at"] = json!("2026-11-01T04:00:00Z");
+    failed["detail"] = json!("Executable unavailable");
+    call(&mut b, "artifact.verification.record", failed);
+    call(&mut b, "artifact.verification.record", p.clone());
+    let checks = call(&mut b, "task.get", json!({"task_id":t}))["evidence_verifications"].clone();
+    assert_eq!(checks[0]["status"], "integration_failure");
+    assert!(checks[0]["observed"].is_null());
+    assert_eq!(checks[1]["status"], "current");
+    for (key, value) in [
+        ("status", json!("changed")),
+        ("checked_at", json!("bad date")),
+        ("detail", json!("x".repeat(2001))),
+    ] {
+        let mut bad = p.clone();
+        bad[key] = value;
+        assert!(!b.dispatch(req("artifact.verification.record", bad)).ok);
+    }
+    call(&mut b, "task.delete", json!({"task_id":t}));
+    assert!(!b.dispatch(req("artifact.verification.record", p)).ok);
+    call(&mut b, "trash.restore", json!({"task_id":t}));
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":t}))["evidence_verifications"],
+        checks
+    );
+    call(&mut b, "task.delete", json!({"task_id":t}));
+    call(&mut b, "trash.purge", json!({"task_id":t}));
+    assert!(evidence::list(&b.conn, None, None).unwrap().is_empty());
+}
+
+#[test]
+fn version_eight_migration_and_backup_keep_original_evidence() {
+    let (dir, mut b, _, t) = setup();
+    let (a, _) = evidence_fixture(&mut b, &t);
+    b.conn
+        .execute_batch("DROP TABLE evidence_verifications; PRAGMA user_version=8;")
+        .unwrap();
+    let old = dir.path().join("v8.sqlite3");
+    b.conn.backup("main", &old, None).unwrap();
+    drop(b);
+    let mut b = Board::open(dir.path()).unwrap();
+    assert_eq!(
+        call(&mut b, "task.get", json!({"task_id":t}))["artifacts"][0],
+        a
+    );
+    call(&mut b, "backup.restore", json!({"path":old}));
+    assert!(
+        call(&mut b, "task.get", json!({"task_id":t}))["evidence_verifications"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        Connection::open(old)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
+            .unwrap(),
+        8
+    );
+}
+
 #[test]
 fn completion_time_survives_edits_trash_restore_and_backup() {
     let (dir, mut b, _, task) = setup();
@@ -101,7 +272,7 @@ fn version_seven_recovers_completion_transitions_without_using_later_edits() {
             [&unknown],
         )
         .unwrap();
-    b.conn.execute_batch("DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;").unwrap();
+    b.conn.execute_batch("DROP TABLE evidence_verifications; DROP TRIGGER task_completion_transition; ALTER TABLE tasks DROP COLUMN completed_at; PRAGMA user_version=7;").unwrap();
     drop(b);
     let b = Board::open(dir.path()).unwrap();
     assert_eq!(
@@ -702,7 +873,7 @@ fn invalid_calendar_dates_ranges_and_timezones_do_not_create_tasks() {
 }
 fn downgrade_to_v1(path: &Path) {
     let connection = Connection::open(path).unwrap();
-    connection.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; ALTER TABLE tasks DROP COLUMN time_zone; ALTER TABLE tasks DROP COLUMN scheduled_end; ALTER TABLE tasks DROP COLUMN scheduled_start; ALTER TABLE tasks DROP COLUMN due_at; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS task_revisions; PRAGMA user_version=1;").unwrap();
+    connection.execute_batch("DROP TABLE evidence_verifications; DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; ALTER TABLE tasks DROP COLUMN time_zone; ALTER TABLE tasks DROP COLUMN scheduled_end; ALTER TABLE tasks DROP COLUMN scheduled_start; ALTER TABLE tasks DROP COLUMN due_at; DROP TABLE IF EXISTS settings; DROP TABLE IF EXISTS task_revisions; PRAGMA user_version=1;").unwrap();
 }
 #[test]
 fn schema_v1_migration_preserves_existing_tasks_and_adds_calendar_defaults() {
@@ -901,7 +1072,7 @@ fn schema_v2_migration_preserves_schedules_and_adds_widget_settings() {
     );
     drop(b);
     let raw = Connection::open(dir.path().join("workboard.sqlite3")).unwrap();
-    raw.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE settings; DROP TABLE task_revisions; PRAGMA user_version=2")
+    raw.execute_batch("DROP TABLE evidence_verifications; DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE settings; DROP TABLE task_revisions; PRAGMA user_version=2")
         .unwrap();
     drop(raw);
     let mut b = Board::open(dir.path()).unwrap();
@@ -1186,7 +1357,7 @@ fn schema_v3_migration_recovers_absent_task_watermark_from_retry_receipts() {
     drop(b);
     let raw = Connection::open(dir.path().join("workboard.sqlite3")).unwrap();
     raw.execute("DELETE FROM tasks WHERE id=?1", [&t]).unwrap();
-    raw.execute_batch("DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE task_revisions; PRAGMA user_version=3")
+    raw.execute_batch("DROP TABLE evidence_verifications; DROP TABLE automations; DROP TABLE automation_executors; DROP TABLE task_dependencies; DROP TABLE checklist_items; DROP TABLE review_decisions; DROP TABLE inbox; DROP TABLE templates; DROP TABLE saved_views; DROP TABLE workflow_revisions; DROP TABLE task_revisions; PRAGMA user_version=3")
         .unwrap();
     drop(raw);
     let mut b = Board::open(dir.path()).unwrap();

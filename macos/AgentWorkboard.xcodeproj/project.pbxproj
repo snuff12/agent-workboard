@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		9E45167FB2AA4FBCAC001001 /* EvidenceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E45167FB2AA4FBCAC001002 /* EvidenceView.swift */; };
 		00CB11D83E00053405F68F48 /* ProcessPresetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */; };
 		0CDD513B0C90C5E6F57AB4C2 /* GoogleWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29E9F4840BB0AF9B5C4A65FD /* GoogleWorkspaceView.swift */; };
 		0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */; };
@@ -66,6 +67,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		9E45167FB2AA4FBCAC001002 /* EvidenceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EvidenceView.swift; sourceTree = "<group>"; };
 		0171C8F0614A68C02905CF43 /* Appearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Appearance.swift; sourceTree = "<group>"; };
 		0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessPresetViews.swift; sourceTree = "<group>"; };
 		125B52992C5FA795A3575AB6 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
@@ -163,6 +165,7 @@
 				0B5E8E3260179EE0DA17F9A6 /* ProcessPresetViews.swift */,
 				5A880F06D49FE999CED11D18 /* QuickCapture.swift */,
 				540119B4CBC5AD15D28363B8 /* TaskDetailView.swift */,
+				9E45167FB2AA4FBCAC001002 /* EvidenceView.swift */,
 				5BBC9C69FF77E2E57AC2F5FA /* Transport.swift */,
 				79E28978FF98B9EBFB5A2941 /* WeeklyPlanner.swift */,
 				9B094FB709613DE58EF7BE4A /* WorkboardApp.swift */,
@@ -356,6 +359,7 @@
 				00CB11D83E00053405F68F48 /* ProcessPresetViews.swift in Sources */,
 				C38163687B4EF789D9F50A69 /* QuickCapture.swift in Sources */,
 				0FB1147F67EE3CB8D49C8066 /* TaskDetailView.swift in Sources */,
+				9E45167FB2AA4FBCAC001001 /* EvidenceView.swift in Sources */,
 				215B487D4151F345AE689BCF /* Transport.swift in Sources */,
 				E677E684FE762D30BE6499D6 /* WeeklyPlanner.swift in Sources */,
 				6AA77E9E2F9DE7A835861145 /* WorkboardApp.swift in Sources */,

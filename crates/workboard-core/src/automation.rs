@@ -833,10 +833,12 @@ pub(super) fn mutate(c: &Transaction<'_>, r: &Request) -> Result<Option<Value>, 
 }
 
 fn non_material_change(r: &Request) -> bool {
-    matches!(r.method.as_str(), "task.attach" | "task.heartbeat")
-        || (r.method == "task.checklist.update"
-            && r.params.get("text").is_none()
-            && r.params.get("required").is_none())
+    matches!(
+        r.method.as_str(),
+        "task.attach" | "task.heartbeat" | "artifact.verification.record"
+    ) || (r.method == "task.checklist.update"
+        && r.params.get("text").is_none()
+        && r.params.get("required").is_none())
 }
 
 fn fence(a: &mut Automation, message: &str) {

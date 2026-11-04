@@ -27,6 +27,8 @@ struct Manifest {
     #[serde(default)]
     task_context_methods: Vec<String>,
     #[serde(default)]
+    artifact_context_methods: Vec<String>,
+    #[serde(default)]
     automation_context_methods: Vec<String>,
     #[serde(default)]
     description: String,
@@ -35,7 +37,7 @@ struct Manifest {
 }
 /// Core requests a plugin may return. Deletion, board restore and service settings stay with the user
 /// whatever a manifest lists, so disabling or removing a plugin always leaves the board intact.
-const PLUGIN_REQUESTS: [&str; 19] = [
+const PLUGIN_REQUESTS: [&str; 21] = [
     "project.list",
     "project.create",
     "task.list",
@@ -51,6 +53,8 @@ const PLUGIN_REQUESTS: [&str; 19] = [
     "task.review",
     "task.complete",
     "task.attach",
+    "artifact.verification.record",
+    "artifact.verification.list",
     "task.pause",
     "task.heartbeat",
     "run.update",
@@ -283,7 +287,10 @@ fn plugin_error_code(candidate: &str) -> &str {
         && (namespace
             || matches!(
                 candidate,
-                "CONFLICT" | "AUTHORIZATION_REQUIRED" | "INVALID_REQUEST"
+                "CONFLICT"
+                    | "AUTHORIZATION_REQUIRED"
+                    | "INVALID_REQUEST"
+                    | "EVIDENCE_SOURCE_CONFLICT"
             ))
     {
         candidate
@@ -677,6 +684,37 @@ pub(super) fn run(
             let mut execution_params = params.clone();
             if entry
                 .manifest
+                .artifact_context_methods
+                .iter()
+                .any(|m| m == method)
+            {
+                let task_id = params["task_id"]
+                    .as_str()
+                    .or_else(|| params["artifact"]["task_id"].as_str())
+                    .ok_or("PLUGIN_INVALID_PARAMS: task_id is required.")?;
+                let artifact_id = params["artifact_id"]
+                    .as_str()
+                    .or_else(|| params["artifact"]["id"].as_str())
+                    .ok_or("PLUGIN_INVALID_PARAMS: artifact_id is required.")?;
+                let context = client.call(
+                    "task.get",
+                    json!({"task_id":task_id}),
+                    &subrequest_id(request_id, "artifact-context"),
+                );
+                if context["ok"] != true {
+                    return Err("PLUGIN_CONTEXT_UNAVAILABLE: Could not read the task for this source check.".into());
+                }
+                let artifact = context["result"]["artifacts"]
+                    .as_array()
+                    .and_then(|items| items.iter().find(|a| a["id"] == artifact_id))
+                    .ok_or(
+                        "EVIDENCE_SOURCE_CONFLICT: The artifact no longer belongs to this task.",
+                    )?;
+                execution_params["artifact"] = artifact.clone();
+                execution_params["task_id"] = json!(task_id);
+            }
+            if entry
+                .manifest
                 .automation_context_methods
                 .iter()
                 .any(|m| m == method)
@@ -740,7 +778,46 @@ pub(super) fn run(
                     "socket": client.socket
                 });
             }
-            let response = invoke_plugin(client, &entry, method, &execution_params, request_id)?;
+            let response = match invoke_plugin(
+                client,
+                &entry,
+                method,
+                &execution_params,
+                request_id,
+            ) {
+                Ok(response) => response,
+                Err(error)
+                    if entry
+                        .manifest
+                        .artifact_context_methods
+                        .iter()
+                        .any(|m| m == method)
+                        && entry
+                            .manifest
+                            .allowed_requests
+                            .iter()
+                            .any(|m| m == "artifact.verification.record")
+                        && (error.starts_with("INTEGRATION_UNAVAILABLE:")
+                            || error.starts_with("PLUGIN_TIMEOUT:")
+                            || error.starts_with("PLUGIN_INVALID_RESPONSE:")
+                            || error.starts_with("PLUGIN_OUTPUT_TOO_LARGE:")
+                            || error.contains("(os error ")) =>
+                {
+                    // A host timeout or broken plugin process is an attempt, never a source verdict.
+                    let a = &execution_params["artifact"];
+                    let metadata = &a["metadata"];
+                    let source = json!({"path":a["path"],"provider":a.get("provider").filter(|v|!v.is_null()).unwrap_or(&metadata["provider"]),
+                        "locator":a.get("locator").filter(|v|!v.is_null()).unwrap_or(&metadata["locator"]),
+                        "ref":metadata["ref"],"collection":metadata["collection"],"source_sha256":metadata["source_sha256"],"scope":metadata["scope"]});
+                    let checked_at = chrono::Utc::now().to_rfc3339();
+                    let detail = error.chars().take(500).collect::<String>();
+                    let result = json!({"artifact_id":a["id"],"status":"integration_failure","checked_at":checked_at,"detail":detail});
+                    json!({"ok":true,"result":result,"requests":[{"method":"artifact.verification.record","params":{
+                        "task_id":a["task_id"],"artifact_id":a["id"],"source":source,"status":"integration_failure",
+                        "checked_at":checked_at,"detail":detail,"actor":format!("plugin:{id}"),"error_code":"PLUGIN_EXECUTION_FAILED"}}]})
+                }
+                Err(error) => return Err(error),
+            };
             crate::cancellation::check()?;
             if let Some(ticket) = &ticket {
                 ticket.prepare(&json!({"generation":entry.generation,"response":response}))?;
@@ -894,6 +971,7 @@ mod error_code_tests {
             "CONFLICT",
             "AUTHORIZATION_REQUIRED",
             "INVALID_REQUEST",
+            "EVIDENCE_SOURCE_CONFLICT",
             "INTEGRATION_DISABLED",
             "INTEGRATION_UNAVAILABLE",
             "PLUGIN_DISABLED",

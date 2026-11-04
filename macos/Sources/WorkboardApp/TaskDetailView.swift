@@ -164,6 +164,9 @@ struct TaskDetailView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 Button { if let url = artifact.url { NSWorkspace.shared.open(url) } } label: { Text(artifact.description.isEmpty ? (artifact.path as NSString).lastPathComponent : artifact.description).font(.system(size: 12)).lineLimit(2).multilineTextAlignment(.leading) }.buttonStyle(.plain).foregroundStyle(appearance.accent).disabled(artifact.url == nil)
                                 Text(artifact.path).font(.system(size: 10)).foregroundStyle(BoardInk.tertiary(colorScheme)).lineLimit(2).textSelection(.enabled)
+                                if artifact.provider == "agent-memory" {
+                                    EvidenceAttachmentView(artifact: artifact, taskID: detail.task.id, checks: detail.evidenceVerifications)
+                                }
                             }
                             Spacer(minLength: 0)
                         }

@@ -12,10 +12,11 @@ use std::{
 use uuid::Uuid;
 
 pub const SCHEMA_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 8;
+pub const DATABASE_VERSION: u32 = 9;
 
 mod automation;
 mod completion;
+mod evidence;
 mod trash;
 mod widget;
 mod workflow;
@@ -661,6 +662,7 @@ impl Board {
             "SELECT id,task_id,agent_id,status,started_at,ended_at,summary,next_action FROM runs",
         )?;
         source.prepare("SELECT request_id,fingerprint,result FROM requests")?;
+        evidence::list(&source, None, None)?;
         source.prepare("SELECT task_id,revision FROM task_revisions")?;
         source.prepare("SELECT rowid FROM task_fts WHERE task_fts MATCH 'probe'")?;
         events(&source, 0)?;
@@ -696,12 +698,13 @@ impl Board {
             // request ledger remain controlled by this service. The restore and its retry result commit together.
             let tx = self.conn.transaction()?;
             automation::before_restore(&tx)?;
-            tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM automations; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
+            tx.execute_batch("PRAGMA defer_foreign_keys=ON; DELETE FROM automations; DELETE FROM task_dependencies; DELETE FROM checklist_items; DELETE FROM review_decisions; DELETE FROM inbox; DELETE FROM templates; DELETE FROM saved_views; DELETE FROM evidence_verifications; DELETE FROM artifacts; DELETE FROM runs; DELETE FROM tasks; DELETE FROM projects; DELETE FROM events;")?;
             for (table,columns) in [
                 ("projects","id,name,directory,created_at"),
                 ("tasks","id,project_id,parent_id,title,goal,completion_criteria,status,priority,assignee,next_action,revision,created_at,updated_at,blocked_reason,completion_summary,claimed_at,due_at,scheduled_start,scheduled_end,time_zone,deleted_at,deletion_id,deleted_by,completed_at"),
                 ("runs","id,task_id,agent_id,status,started_at,ended_at,summary,next_action"),
                 ("artifacts","id,task_id,run_id,path,kind,description,created_at,locator,provider,verified_at,metadata"),
+                ("evidence_verifications","id,task_id,artifact_id,request_id,checked_at,recorded_at,data"),
                 ("task_dependencies","task_id,depends_on_id"),
                 ("checklist_items","id,task_id,text,required,checked,evidence,created_at"),
                 ("review_decisions","id,task_id,decision,summary,run_id,actor,created_at"),
@@ -711,7 +714,7 @@ impl Board {
                 ("automations","task_id,data"),
                 ("events","sequence,request_id,task_id,kind,actor,created_at,data"),
             ] {
-                let order=if ["runs","checklist_items","review_decisions"].contains(&table) {" ORDER BY rowid"}else{""};
+                let order=if ["runs","checklist_items","review_decisions","evidence_verifications"].contains(&table) {" ORDER BY rowid"}else{""};
                 tx.execute_batch(&format!("INSERT INTO main.{table}({columns}) SELECT {columns} FROM restoration.{table}{order}"))?;
             }
             let conflicts:i64=tx.query_row("SELECT count(*) FROM main.requests live JOIN restoration.requests saved USING(request_id) WHERE live.fingerprint<>saved.fingerprint",[],|row|row.get(0))?;
@@ -768,7 +771,7 @@ impl Board {
         let artifacts = all_artifacts(&self.conn, None)?;
         let runs = all_runs(&self.conn, None)?;
         let events = events(&self.conn, 0)?;
-        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"trash":state["trash"],"automations":state["automations"],"automation_defaults":state["automation_defaults"],"process_presets":state["process_presets"],"artifacts":artifacts,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
+        let document = json!({"schema_version":1,"exported_at":now(),"projects":state["projects"],"tasks":state["tasks"],"trash":state["trash"],"automations":state["automations"],"automation_defaults":state["automation_defaults"],"process_presets":state["process_presets"],"artifacts":artifacts,"evidence_verifications":evidence::list(&self.conn,None,None)?,"runs":runs,"events":events,"templates":state["templates"],"views":state["views"],"inbox":state["inbox"],"review_decisions":workflow::review_decisions(&self.conn,None)?,"event_sequence":state["event_sequence"]});
         let format = optional(p, "format")?.unwrap_or_else(|| "json".into());
         let content = match format.as_str() {
             "json" => serde_json::to_string_pretty(&document)?,
@@ -879,6 +882,9 @@ COMMIT;
     }
     if version < 8 {
         completion::migrate(conn)?;
+    }
+    if version < 9 {
+        evidence::migrate(conn)?;
     }
     Ok(())
 }
@@ -1199,7 +1205,7 @@ fn task_detail(c: &Connection, id: &str) -> Result<Value, ApiError> {
     let completed = children.iter().filter(|x| x.status == "done").count();
     let canceled = children.iter().filter(|x| x.status == "canceled").count();
     Ok(
-        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"canceled_child_count":canceled,"artifacts":all_artifacts(c,Some(id))?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?,"automation":automation::get_public(c,id)?}),
+        json!({"task":task,"children":children,"child_count":children.len(),"completed_child_count":completed,"canceled_child_count":canceled,"artifacts":all_artifacts(c,Some(id))?,"evidence_verifications":evidence::list(c,Some(id),None)?,"runs":all_runs(c,Some(id))?,"review_decisions":workflow::review_decisions(c,Some(id))?,"automation":automation::get_public(c,id)?}),
     )
 }
 fn read_method(c: &Connection, method: &str, p: &Value) -> Result<Value, ApiError> {
@@ -1207,6 +1213,13 @@ fn read_method(c: &Connection, method: &str, p: &Value) -> Result<Value, ApiErro
         return Ok(value);
     }
     match method {
+        "artifact.verification.list" => {
+            let task_id = required(p, "task_id")?;
+            get_task(c, task_id)?;
+            Ok(
+                json!({"evidence_verifications":evidence::list(c,Some(task_id),optional(p,"artifact_id")?.as_deref())?}),
+            )
+        }
         "template.list" => Ok(json!({"templates":workflow::templates(c)?})),
         "trash.list" => Ok(json!({"items":trash::items(c)?})),
         "view.list" => Ok(json!({"views":workflow::views(c)?})),
@@ -1276,6 +1289,7 @@ fn is_mutation(method: &str) -> bool {
             | "task.review"
             | "task.complete"
             | "task.attach"
+            | "artifact.verification.record"
             | "task.pause"
             | "task.heartbeat"
             | "task.delete"
@@ -1374,8 +1388,12 @@ fn delete_tasks(c: &Connection, tasks: &[Task]) -> Result<Value, ApiError> {
     }
     let list = serde_json::to_string(&ids)?;
     let workflow = workflow::detach_deleted_tasks(c, &tasks)?;
+    let checks = evidence::list(c, None, None)?
+        .into_iter()
+        .filter(|v| ids.iter().any(|id| v["task_id"] == *id))
+        .collect::<Vec<_>>();
     // Each statement removes parents and children together; SQLite checks foreign keys per statement.
-    for table in ["artifacts", "runs"] {
+    for table in ["evidence_verifications", "artifacts", "runs"] {
         c.execute(
             &format!("DELETE FROM {table} WHERE task_id IN (SELECT value FROM json_each(?1))"),
             [&list],
@@ -1385,7 +1403,9 @@ fn delete_tasks(c: &Connection, tasks: &[Task]) -> Result<Value, ApiError> {
         "DELETE FROM tasks WHERE id IN (SELECT value FROM json_each(?1))",
         [&list],
     )?;
-    Ok(json!({"tasks":tasks,"runs":runs,"artifacts":artifacts,"workflow":workflow}))
+    Ok(
+        json!({"tasks":tasks,"runs":runs,"artifacts":artifacts,"evidence_verifications":checks,"workflow":workflow}),
+    )
 }
 fn save_task(c: &Connection, t: &Task) -> Result<(), ApiError> {
     c.execute("UPDATE tasks SET parent_id=?2,title=?3,goal=?4,completion_criteria=?5,status=?6,priority=?7,assignee=?8,next_action=?9,revision=?10,updated_at=?11,blocked_reason=?12,completion_summary=?13,claimed_at=?14,due_at=?15,scheduled_start=?16,scheduled_end=?17,time_zone=?18 WHERE id=?1",params![t.id,t.parent_id,t.title,t.goal,t.completion_criteria,t.status,t.priority,t.assignee,t.next_action,t.revision,t.updated_at,t.blocked_reason,t.completion_summary,t.claimed_at,t.due_at,t.scheduled_start,t.scheduled_end,t.time_zone])?;
@@ -1830,6 +1850,9 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             }
             extra["summary"] = json!(summary);
         }
+        "artifact.verification.record" => {
+            extra["verification"] = evidence::record_check(c, r, &t)?;
+        }
         "task.attach" => {
             let run_id = optional(p, "run_id")?;
             if let Some(run_id) = &run_id {
@@ -1860,6 +1883,20 @@ fn mutate(c: &Transaction<'_>, r: &Request, data_dir: &Path) -> Result<Value, Ap
             };
             if !a.metadata.is_object() {
                 return Err(invalid("metadata must be a JSON object"));
+            }
+            if let Some(previous) = a.metadata.get("supersedes_artifact_id") {
+                let previous = previous.as_str().filter(|v| !v.is_empty()).ok_or_else(|| {
+                    invalid("supersedes_artifact_id must be a nonempty artifact ID")
+                })?;
+                if !all_artifacts(c, Some(task_id))?
+                    .iter()
+                    .any(|old| old.id == previous)
+                {
+                    return Err(ApiError::new(
+                        "EVIDENCE_SOURCE_CONFLICT",
+                        "The replaced artifact must belong to the same task",
+                    ));
+                }
             }
             c.execute("INSERT INTO artifacts(id,task_id,run_id,path,kind,description,created_at,locator,provider,verified_at,metadata) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![a.id,a.task_id,a.run_id,a.path,a.kind,a.description,a.created_at,a.locator,a.provider,a.verified_at,serde_json::to_string(&a.metadata)?])?;
             extra["artifact"] = json!(a);
@@ -2151,6 +2188,23 @@ fn markdown(doc: &Value) -> String {
             ));
         }
         out.push('\n');
+    }
+    if let Some(checks) = doc["evidence_verifications"]
+        .as_array()
+        .filter(|v| !v.is_empty())
+    {
+        out.push_str("## Evidence verification history\n\n");
+        for check in checks {
+            out.push_str(&format!(
+                "- {} · checked {} · recorded {} · artifact {} · task {}\n\n```json\n{}\n```\n\n",
+                check["status"].as_str().unwrap_or(""),
+                check["checked_at"].as_str().unwrap_or(""),
+                check["recorded_at"].as_str().unwrap_or(""),
+                check["artifact_id"].as_str().unwrap_or(""),
+                check["task_id"].as_str().unwrap_or(""),
+                serde_json::to_string_pretty(check).unwrap()
+            ));
+        }
     }
     workflow::markdown(doc, &mut out);
     out

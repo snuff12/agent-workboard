@@ -11,12 +11,15 @@ struct InstalledPlugin: Identifiable {
     let enabled: Bool
     let compatible: Bool
     let methods: [String]
+    let allowedRequests: [String]
     init?(_ json: JSONValue) {
         guard let id = json["id"].string else { return nil }
         self.id = id; name = json["name"].string ?? id; version = json["version"].string ?? ""
         description = json["description"].string ?? ""; enabled = json["enabled"].bool ?? false
         compatible = json["compatible"].bool ?? false; methods = json["methods"].array.compactMap(\.string)
+        allowedRequests = json["allowed_requests"].array.compactMap(\.string)
     }
+    var savesEvidenceChecks: Bool { methods.contains("verify") && allowedRequests.contains("artifact.verification.record") }
 }
 
 @MainActor final class PluginStore: ObservableObject {

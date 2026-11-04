@@ -22,6 +22,18 @@ import SwiftUI
         guard store.connectionError == nil else { throw WorkboardError(message: store.connectionError ?? "Cannot load actual board") }
         store.selectedProjectID = store.projects.first(where: { $0.directory == FileManager.default.currentDirectoryPath })?.id ?? store.projects.first?.id
         if let parent = store.tasks.first(where: { $0.parentID == nil }) { await store.openTask(parent.id) }
+        if environment["WORKBOARD_PREVIEW_EVIDENCE_ONLY"] == "1", let detail = store.detail,
+           let artifact = detail.artifacts.first(where: { $0.provider == "agent-memory" }) {
+            for mode in [AppearanceMode.light, .dark] {
+                let scheme: ColorScheme = mode == .dark ? .dark : .light
+                let content = EvidenceAttachmentView(artifact: artifact, taskID: detail.task.id, checks: detail.evidenceVerifications, showingHistory: true)
+                    .environmentObject(store).environment(\.colorScheme, scheme).padding(24).frame(width: 660, height: 830, alignment: .topLeading)
+                try capture(content, size: NSSize(width: 660, height: 830), appearance: mode == .dark ? .darkAqua : .aqua,
+                            output: output.appendingPathComponent("evidence-\(mode.rawValue).png"))
+            }
+            print("Evidence pixel QA from actual isolated service data; native clicks require separate evidence: \(output.path)")
+            app.terminate(nil); return
+        }
         if environment["WORKBOARD_PREVIEW_PRESETS_ONLY"] == "1", let project = store.projects.first {
             for mode in [AppearanceMode.light, .dark] {
                 let scheme: ColorScheme = mode == .dark ? .dark : .light
